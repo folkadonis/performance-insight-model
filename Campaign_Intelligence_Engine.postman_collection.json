@@ -1,14 +1,15 @@
 {
   "info": {
-    "name": "Campaign Performance Intelligence Engine",
-    "description": "Complete API collection for the Resulticks Campaign Performance Intelligence Engine.\nBase URL: http://localhost:8000\nTrained Tenant: 00b4e220_6121_4a93_a63f_d0848bd73506",
+    "name": "Campaign Intelligence Engine",
+    "description": "API collection for the Resulticks Campaign Performance Intelligence Engine.\n\nBase URL : http://127.0.0.1:8001\nLLM      : Ollama qwen2.5:14b via Resulticks proxy (10.102.1.2:7557)\nTrained  : tenant 00b4e220_6121_4a93_a63f_d0848bd73506 (short-code hUe)\n\nWorkflow:\n  1. POST /generate-from-campaign  ← full auto pipeline (recommended)\n  2. POST /ml/score                ← inspect ML scores only\n  3. POST /generate-ollama         ← LLM with hand-crafted payload",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "_postman_id": "cpi-engine-resulticks-v1"
+    "_postman_id": "cpi-engine-resulticks-v2"
   },
   "variable": [
-    { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
-    { "key": "tenant_id", "value": "00b4e220_6121_4a93_a63f_d0848bd73506", "type": "string" },
-    { "key": "campaign_id", "value": "CMP_Q2_CC_2024", "type": "string" }
+    { "key": "base_url",   "value": "http://127.0.0.1:8001",                           "type": "string" },
+    { "key": "tenant_id",  "value": "00b4e220_6121_4a93_a63f_d0848bd73506",             "type": "string" },
+    { "key": "campaign_id","value": "40182",                                             "type": "string" },
+    { "key": "tenant_code","value": "hUe",                                               "type": "string" }
   ],
   "item": [
 
@@ -20,143 +21,370 @@
           "request": {
             "method": "GET",
             "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] },
-            "description": "Check if the API server is running."
-          }
+            "description": "Returns {\"status\": \"ok\", \"version\": \"...\"} when the server is running."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\"status\": \"ok\", \"version\": \"1.0.0\"}"
+            }
+          ]
         },
         {
           "name": "Root Info",
           "request": {
             "method": "GET",
             "url": { "raw": "{{base_url}}/", "host": ["{{base_url}}"], "path": [""] },
-            "description": "Returns service name and version."
+            "description": "Returns service name, version, and available endpoint list."
+          }
+        },
+        {
+          "name": "Interactive Docs (Swagger)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/docs", "host": ["{{base_url}}"], "path": ["docs"] },
+            "description": "Open in a browser to explore all endpoints interactively."
           }
         }
       ]
     },
 
     {
-      "name": "2. Insights — Ollama LLM (Primary)",
+      "name": "2. DB-Driven Pipeline (generate-from-campaign)",
+      "description": "Full auto pipeline: campaign_id + tenant_short_code → DB fetch → ML scoring → Ollama LLM → structured insights.\n\nRequires:\n- Resulticks ProxySQL access (10.200.2.195:6033)\n- Ollama proxy access (10.102.1.2:7557)\n\nPostgreSQL dedup/persist is optional (skipped gracefully if PG is not running).",
       "item": [
         {
-          "name": "Generate Insights via Ollama (Minimal)",
+          "name": "Generate Insights — Live Campaign (Known-Good)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/insights/generate-ollama", "host": ["{{base_url}}"], "path": ["api","v1","insights","generate-ollama"] },
+            "url": {
+              "raw": "{{base_url}}/api/v1/insights/generate-from-campaign",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","insights","generate-from-campaign"]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tenant_id\": \"00b4e220_6121_4a93_a63f_d0848bd73506\",\n  \"tenant_name\": \"Resulticks Demo\",\n  \"bu_id\": 0,\n  \"bu_name\": \"Credit Cards\",\n  \"industry_name\": \"Banking\",\n  \"campaign_name\": \"Q2 Re-engagement Email\",\n  \"campaign_type\": \"Promotional\",\n  \"segment_size\": 50000,\n  \"audience_reach\": 42000,\n  \"email_sent\": 42000,\n  \"email_opens\": 8400,\n  \"email_clicks\": 1260,\n  \"email_bounces\": 630,\n  \"email_unsubs\": 84,\n  \"sms_sent\": 0,\n  \"sms_clicks\": 0,\n  \"min_confidence\": 60,\n  \"scope\": \"BU\"\n}"
+              "raw": "{\n  \"campaign_id\": 40182,\n  \"tenant_short_code\": \"hUe\",\n  \"bu_id\": 0,\n  \"segmentation_list_id\": 341908\n}"
             },
-            "description": "Minimal request — email only, no ML scores pre-computed. Ollama generates insights from raw metrics."
+            "description": "Verified working example.\n\ncampaign_id         : integer from ccampaign.CampaignID (per-tenant fact table)\ntenant_short_code   : TenantShortCode from resulticksmaster.TenantLookup (case-sensitive)\nbu_id               : numeric BU ID (0 = default BU)\nsegmentation_list_id: SegmentationListID that filters the fact table and historical context\n\nThe engine:\n1. Resolves tenant UUID from short-code\n2. Fetches campaign metadata + metrics from ccampaign / ccampaignchannelmapping\n3. Fetches last-10-campaign historical avg per channel from per-tenant MySQL\n4. Runs 4-tier ML scoring (BU → Tenant → Market → Industry fallback)\n5. Calls Ollama qwen2.5:14b for 5-10 structured insights\n6. Deduplicates against 30-day history (if PostgreSQL available)"
+          },
+          "response": [
+            {
+              "name": "200 — Insights generated",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"campaign_id\": \"40182\",\n  \"llm_model\": \"qwen2.5:14b\",\n  \"confidence_avg\": 78.4,\n  \"insights\": [\n    {\n      \"insight_type\": \"Performance\",\n      \"category\": \"Benchmark\",\n      \"scope\": \"BU\",\n      \"title\": \"Email Open Rate Below BU Average\",\n      \"observation\": \"Email open rate was 14.2%, against BU average of 24.8% — a deficit of 10.6 percentage points.\",\n      \"root_cause\": \"engagement_quality_score of 0.31 and timing_quality_score of 0.44 suggest suboptimal send-time and subject-line fatigue.\",\n      \"recommendation\": \"A/B test subject lines with personalised tokens by 15 Aug; shift send window from 09:00 to 11:00–13:00 IST based on BU peak open data.\",\n      \"business_impact\": \"Closing the 10.6pp gap on a 50 000-recipient list adds ~5 300 opens and an estimated +1.8pp conversion uplift.\",\n      \"confidence\": 82\n    }\n  ],\n  \"ml_scores\": {\n    \"reach_score\": 0.43,\n    \"engagement_quality_score\": 0.31,\n    \"channel_efficiency_email\": 0.29,\n    \"audience_fit_score\": 0.67\n  },\n  \"generated_at\": \"2026-07-10T08:30:00.000Z\"\n}"
+            },
+            {
+              "name": "404 — Campaign or tenant not found",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\"detail\": \"TenantShortCode 'XYZ' not found in TenantLookup\"}"
+            },
+            {
+              "name": "502 — DB unreachable",
+              "status": "Bad Gateway",
+              "code": 502,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\"detail\": \"Resulticks DB fetch failed: Can't connect to MySQL server on '10.200.2.195'\"}"
+            },
+            {
+              "name": "503 — LLM unavailable",
+              "status": "Service Unavailable",
+              "code": 503,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\"detail\": \"LLM service error: Cannot reach Ollama endpoint at http://10.102.1.2:7557\"}"
+            }
+          ]
+        },
+        {
+          "name": "Generate Insights — Different Campaign (Template)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/insights/generate-from-campaign",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","insights","generate-from-campaign"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"campaign_id\": 12345,\n  \"tenant_short_code\": \"hUe\",\n  \"bu_id\": 0,\n  \"segmentation_list_id\": 341908\n}"
+            },
+            "description": "Replace campaign_id with any real CampaignID from the tenant's ccampaign table."
           }
         },
         {
-          "name": "Generate Insights via Ollama (Full — All Channels + ML Scores)",
+          "name": "Get Stored Insights — By Campaign ID",
           "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/insights/generate-ollama", "host": ["{{base_url}}"], "path": ["api","v1","insights","generate-ollama"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tenant_id\": \"00b4e220_6121_4a93_a63f_d0848bd73506\",\n  \"tenant_name\": \"Resulticks Demo\",\n  \"bu_id\": 0,\n  \"bu_name\": \"Credit Cards\",\n  \"industry_name\": \"Banking & Financial Services\",\n  \"campaign_name\": \"Q2 Credit Card Activation Drive\",\n  \"campaign_type\": \"Promotional\",\n\n  \"segment_size\": 142500,\n  \"audience_reach\": 61493,\n\n  \"email_sent\": 98200,\n  \"email_opens\": 23862,\n  \"email_clicks\": 4026,\n  \"email_bounces\": 12177,\n  \"email_unsubs\": 589,\n\n  \"sms_sent\": 142500,\n  \"sms_clicks\": 3990,\n\n  \"wa_sent\": 142500,\n  \"wa_delivered\": 114000,\n  \"wa_clicks\": 12996,\n\n  \"reach_score\": 0.52,\n  \"engagement_quality_score\": 0.74,\n  \"channel_efficiency_email\": 0.48,\n  \"channel_efficiency_sms\": 0.61,\n  \"audience_fit_score\": 0.79,\n  \"timing_quality_score\": 0.61,\n  \"journey_effectiveness\": 0.68,\n  \"frequency_risk_score\": 0.44,\n  \"churn_signal_score\": 0.21,\n  \"cross_sell_opportunity\": 0.87,\n  \"conversion_probability\": 0.71,\n  \"model_confidence\": 0.89,\n\n  \"benchmark_delta_vs_bu\": -0.7,\n  \"benchmark_delta_vs_industry\": 0.8,\n  \"percentile_rank_industry\": 61.0,\n\n  \"tenant_avg_open_rate\": 0.248,\n  \"tenant_avg_click_rate\": 0.038,\n  \"industry_avg_open_rate\": 0.239,\n\n  \"anomaly_flags\": [\n    \"hard_bounce_rate_3x_above_bu_avg\",\n    \"whatsapp_ctr_2.4x_above_industry\",\n    \"unsubscribe_spike_18_24_band\"\n  ],\n\n  \"min_confidence\": 60,\n  \"scope\": \"BU\"\n}"
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/insights/{{campaign_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","insights","{{campaign_id}}"]
             },
-            "description": "Full request with all channels, pre-computed ML scores, benchmark deltas, and anomaly flags. Best insight quality."
-          }
-        },
-        {
-          "name": "Generate Insights via Ollama (SMS + WhatsApp Campaign)",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/insights/generate-ollama", "host": ["{{base_url}}"], "path": ["api","v1","insights","generate-ollama"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tenant_id\": \"00b4e220_6121_4a93_a63f_d0848bd73506\",\n  \"tenant_name\": \"Resulticks Demo\",\n  \"bu_id\": 0,\n  \"bu_name\": \"Home Loans\",\n  \"industry_name\": \"Banking & Financial Services\",\n  \"campaign_name\": \"Home Loan Q3 Retention Drive\",\n  \"campaign_type\": \"Lifecycle\",\n\n  \"segment_size\": 85000,\n  \"audience_reach\": 51000,\n\n  \"email_sent\": 51000,\n  \"email_opens\": 7650,\n  \"email_clicks\": 918,\n  \"email_bounces\": 2040,\n  \"email_unsubs\": 255,\n\n  \"sms_sent\": 85000,\n  \"sms_clicks\": 2550,\n\n  \"wa_sent\": 85000,\n  \"wa_delivered\": 76500,\n  \"wa_clicks\": 9180,\n\n  \"reach_score\": 0.71,\n  \"engagement_quality_score\": 0.63,\n  \"channel_efficiency_email\": 0.39,\n  \"channel_efficiency_sms\": 0.58,\n  \"audience_fit_score\": 0.67,\n  \"timing_quality_score\": 0.72,\n  \"journey_effectiveness\": 0.59,\n  \"frequency_risk_score\": 0.31,\n  \"churn_signal_score\": 0.28,\n  \"cross_sell_opportunity\": 0.74,\n  \"conversion_probability\": 0.55,\n  \"model_confidence\": 0.82,\n\n  \"benchmark_delta_vs_bu\": 1.2,\n  \"benchmark_delta_vs_industry\": -0.5,\n  \"percentile_rank_industry\": 54.0,\n\n  \"anomaly_flags\": [\"email_open_rate_below_p25\"],\n\n  \"min_confidence\": 65,\n  \"scope\": \"Tenant\"\n}"
-            },
-            "description": "Lifecycle campaign with WhatsApp dominant. Email underperforming — expect channel rebalancing insights."
-          }
-        },
-        {
-          "name": "Generate Insights via Ollama (High Risk — Churn Signals)",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/insights/generate-ollama", "host": ["{{base_url}}"], "path": ["api","v1","insights","generate-ollama"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tenant_id\": \"00b4e220_6121_4a93_a63f_d0848bd73506\",\n  \"tenant_name\": \"Resulticks Demo\",\n  \"bu_id\": 0,\n  \"bu_name\": \"Mobile Banking\",\n  \"industry_name\": \"Banking & Financial Services\",\n  \"campaign_name\": \"App Re-engagement Push Blast\",\n  \"campaign_type\": \"Transactional\",\n\n  \"segment_size\": 200000,\n  \"audience_reach\": 60000,\n\n  \"email_sent\": 60000,\n  \"email_opens\": 4200,\n  \"email_clicks\": 420,\n  \"email_bounces\": 9000,\n  \"email_unsubs\": 1800,\n\n  \"sms_sent\": 200000,\n  \"sms_clicks\": 2000,\n\n  \"wa_sent\": 0,\n  \"wa_delivered\": 0,\n  \"wa_clicks\": 0,\n\n  \"reach_score\": 0.30,\n  \"engagement_quality_score\": 0.22,\n  \"channel_efficiency_email\": 0.18,\n  \"channel_efficiency_sms\": 0.25,\n  \"audience_fit_score\": 0.41,\n  \"timing_quality_score\": 0.45,\n  \"journey_effectiveness\": 0.29,\n  \"frequency_risk_score\": 0.82,\n  \"churn_signal_score\": 0.78,\n  \"cross_sell_opportunity\": 0.33,\n  \"conversion_probability\": 0.19,\n  \"model_confidence\": 0.84,\n\n  \"benchmark_delta_vs_bu\": -3.8,\n  \"benchmark_delta_vs_industry\": -2.1,\n  \"percentile_rank_industry\": 18.0,\n\n  \"anomaly_flags\": [\n    \"frequency_risk_critical_above_0.8\",\n    \"churn_signal_above_0.75\",\n    \"email_bounce_rate_15pct\",\n    \"unsubscribe_rate_3pct\"\n  ],\n\n  \"min_confidence\": 60,\n  \"scope\": \"BU\"\n}"
-            },
-            "description": "Campaign with critical churn signals and high frequency risk. Expect Anomaly + Risk-heavy insights."
+            "description": "Retrieve previously generated and persisted insights from PostgreSQL.\n\nReturns 404 if PostgreSQL is not running or no insights were stored for this campaign_id."
           }
         }
       ]
     },
 
     {
-      "name": "3. Insights — Full Pipeline (Claude LLM)",
+      "name": "3. Ollama LLM — Manual Payload (generate-ollama)",
+      "description": "Call the LLM directly with pre-computed metrics and (optionally) ML scores. Useful for testing prompt quality or injecting custom data without touching the DB.",
+      "item": [
+        {
+          "name": "Generate Insights — Email Only (Minimal)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/insights/generate-ollama",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","insights","generate-ollama"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"tenant_name\": \"Resulticks Demo\",\n  \"bu_id\": 0,\n  \"bu_name\": \"Credit Cards\",\n  \"industry_name\": \"Banking\",\n  \"campaign_name\": \"Q2 Re-engagement Email\",\n  \"campaign_type\": \"Promotional\",\n  \"segment_size\": 50000,\n  \"audience_reach\": 42000,\n  \"email_sent\": 42000,\n  \"email_opens\": 8400,\n  \"email_clicks\": 1260,\n  \"email_bounces\": 630,\n  \"email_unsubs\": 84,\n  \"sms_sent\": 0,\n  \"sms_clicks\": 0,\n  \"min_confidence\": 60,\n  \"scope\": \"BU\"\n}"
+            },
+            "description": "Minimal payload — email channel only, no ML scores. The LLM derives insights from raw metrics alone.\n\nRequired fields: tenant_id, bu_id, campaign_name, segment_size, audience_reach, email_sent.\nAll ML score fields are optional (omit or set to null)."
+          }
+        },
+        {
+          "name": "Generate Insights — All Channels + ML Scores (Full)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/insights/generate-ollama",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","insights","generate-ollama"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"tenant_name\": \"Resulticks Demo\",\n  \"bu_id\": 0,\n  \"bu_name\": \"Credit Cards\",\n  \"industry_name\": \"Banking & Financial Services\",\n  \"campaign_name\": \"Q2 Credit Card Activation Drive\",\n  \"campaign_type\": \"Promotional\",\n\n  \"segment_size\": 142500,\n  \"audience_reach\": 61493,\n\n  \"email_sent\": 98200,\n  \"email_opens\": 23862,\n  \"email_clicks\": 4026,\n  \"email_bounces\": 12177,\n  \"email_unsubs\": 589,\n\n  \"sms_sent\": 142500,\n  \"sms_clicks\": 3990,\n\n  \"wa_sent\": 142500,\n  \"wa_delivered\": 114000,\n  \"wa_clicks\": 12996,\n\n  \"reach_score\": 0.52,\n  \"engagement_quality_score\": 0.74,\n  \"channel_efficiency_email\": 0.48,\n  \"channel_efficiency_sms\": 0.61,\n  \"audience_fit_score\": 0.79,\n  \"timing_quality_score\": 0.61,\n  \"journey_effectiveness\": 0.68,\n  \"frequency_risk_score\": 0.44,\n  \"churn_signal_score\": 0.21,\n  \"cross_sell_opportunity\": 0.87,\n  \"conversion_probability\": 0.71,\n  \"model_confidence\": 0.89,\n\n  \"benchmark_delta_vs_bu\": -0.7,\n  \"benchmark_delta_vs_industry\": 0.8,\n  \"percentile_rank_industry\": 61.0,\n\n  \"tenant_avg_open_rate\": 0.248,\n  \"tenant_avg_click_rate\": 0.038,\n  \"industry_avg_open_rate\": 0.239,\n\n  \"anomaly_flags\": [\n    \"hard_bounce_rate_above_bu_avg\",\n    \"whatsapp_ctr_above_industry\",\n    \"unsubscribe_spike_18_24_band\"\n  ],\n\n  \"min_confidence\": 60,\n  \"scope\": \"BU\"\n}"
+            },
+            "description": "Full payload: email + SMS + WhatsApp, all 13 ML scores, benchmark deltas, anomaly flags.\n\nML scores are 0–1 normalized. Providing them gives the LLM richer signal and produces higher-quality insights.\n\nInsight quality order:\n  Full payload > Partial scores > Raw metrics only"
+          }
+        },
+        {
+          "name": "Generate Insights — WhatsApp Dominant (Lifecycle)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/insights/generate-ollama",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","insights","generate-ollama"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"tenant_name\": \"Resulticks Demo\",\n  \"bu_id\": 0,\n  \"bu_name\": \"Home Loans\",\n  \"industry_name\": \"Banking & Financial Services\",\n  \"campaign_name\": \"Home Loan Q3 Retention Drive\",\n  \"campaign_type\": \"Lifecycle\",\n\n  \"segment_size\": 85000,\n  \"audience_reach\": 51000,\n\n  \"email_sent\": 51000,\n  \"email_opens\": 7650,\n  \"email_clicks\": 918,\n  \"email_bounces\": 2040,\n  \"email_unsubs\": 255,\n\n  \"sms_sent\": 85000,\n  \"sms_clicks\": 2550,\n\n  \"wa_sent\": 85000,\n  \"wa_delivered\": 76500,\n  \"wa_clicks\": 9180,\n\n  \"reach_score\": 0.71,\n  \"engagement_quality_score\": 0.63,\n  \"channel_efficiency_email\": 0.39,\n  \"channel_efficiency_sms\": 0.58,\n  \"audience_fit_score\": 0.67,\n  \"timing_quality_score\": 0.72,\n  \"journey_effectiveness\": 0.59,\n  \"frequency_risk_score\": 0.31,\n  \"churn_signal_score\": 0.28,\n  \"cross_sell_opportunity\": 0.74,\n  \"conversion_probability\": 0.55,\n  \"model_confidence\": 0.82,\n\n  \"benchmark_delta_vs_bu\": 1.2,\n  \"benchmark_delta_vs_industry\": -0.5,\n  \"percentile_rank_industry\": 54.0,\n\n  \"anomaly_flags\": [\"email_open_rate_below_p25\"],\n\n  \"min_confidence\": 65,\n  \"scope\": \"Tenant\"\n}"
+            },
+            "description": "Lifecycle campaign with WhatsApp as the strongest channel (CTR 10.8%). Email open rate below 25th percentile. Expect channel-rebalancing and journey insights."
+          }
+        },
+        {
+          "name": "Generate Insights — Critical Churn & Frequency Risk",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/insights/generate-ollama",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","insights","generate-ollama"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"tenant_name\": \"Resulticks Demo\",\n  \"bu_id\": 0,\n  \"bu_name\": \"Mobile Banking\",\n  \"industry_name\": \"Banking & Financial Services\",\n  \"campaign_name\": \"App Re-engagement Push Blast\",\n  \"campaign_type\": \"Transactional\",\n\n  \"segment_size\": 200000,\n  \"audience_reach\": 60000,\n\n  \"email_sent\": 60000,\n  \"email_opens\": 4200,\n  \"email_clicks\": 420,\n  \"email_bounces\": 9000,\n  \"email_unsubs\": 1800,\n\n  \"sms_sent\": 200000,\n  \"sms_clicks\": 2000,\n\n  \"wa_sent\": 0,\n  \"wa_delivered\": 0,\n  \"wa_clicks\": 0,\n\n  \"reach_score\": 0.30,\n  \"engagement_quality_score\": 0.22,\n  \"channel_efficiency_email\": 0.18,\n  \"channel_efficiency_sms\": 0.25,\n  \"audience_fit_score\": 0.41,\n  \"timing_quality_score\": 0.45,\n  \"journey_effectiveness\": 0.29,\n  \"frequency_risk_score\": 0.82,\n  \"churn_signal_score\": 0.78,\n  \"cross_sell_opportunity\": 0.33,\n  \"conversion_probability\": 0.19,\n  \"model_confidence\": 0.84,\n\n  \"benchmark_delta_vs_bu\": -3.8,\n  \"benchmark_delta_vs_industry\": -2.1,\n  \"percentile_rank_industry\": 18.0,\n\n  \"anomaly_flags\": [\n    \"frequency_risk_critical\",\n    \"churn_signal_high\",\n    \"email_bounce_rate_15pct\",\n    \"unsubscribe_rate_3pct\"\n  ],\n\n  \"min_confidence\": 60,\n  \"scope\": \"BU\"\n}"
+            },
+            "description": "Worst-case campaign: frequency_risk_score 0.82, churn_signal_score 0.78, bounce rate 15%, unsub rate 3%. Expect Anomaly + Risk + Prescriptive insights with urgent remediation recommendations."
+          }
+        },
+        {
+          "name": "Generate Insights — Mobile Push + SMS Only",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/insights/generate-ollama",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","insights","generate-ollama"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"tenant_name\": \"Resulticks Demo\",\n  \"bu_id\": 0,\n  \"bu_name\": \"Digital Products\",\n  \"industry_name\": \"Telecom\",\n  \"campaign_name\": \"5G Upgrade Push — July Batch\",\n  \"campaign_type\": \"Promotional\",\n\n  \"segment_size\": 320000,\n  \"audience_reach\": 278000,\n\n  \"email_sent\": 0,\n  \"email_opens\": 0,\n  \"email_clicks\": 0,\n  \"email_bounces\": 0,\n  \"email_unsubs\": 0,\n\n  \"sms_sent\": 320000,\n  \"sms_clicks\": 19200,\n\n  \"wa_sent\": 0,\n  \"wa_delivered\": 0,\n  \"wa_clicks\": 0,\n\n  \"reach_score\": 0.87,\n  \"engagement_quality_score\": 0.61,\n  \"channel_efficiency_sms\": 0.60,\n  \"audience_fit_score\": 0.73,\n  \"timing_quality_score\": 0.69,\n  \"journey_effectiveness\": 0.55,\n  \"frequency_risk_score\": 0.38,\n  \"churn_signal_score\": 0.14,\n  \"cross_sell_opportunity\": 0.68,\n  \"conversion_probability\": 0.49,\n  \"model_confidence\": 0.77,\n\n  \"benchmark_delta_vs_bu\": 2.1,\n  \"benchmark_delta_vs_industry\": 1.4,\n  \"percentile_rank_industry\": 72.0,\n\n  \"anomaly_flags\": [],\n\n  \"min_confidence\": 60,\n  \"scope\": \"Tenant\"\n}"
+            },
+            "description": "Push + SMS only, no email or WhatsApp. High reach (86.9%). Tests channel efficiency insights for non-email campaigns."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "4. Manual Insight Generation (generate)",
+      "description": "Full pipeline with a manually constructed payload — hierarchy, metadata, metrics, audience features, and historical context all provided explicitly. Useful for testing or when the campaign data is not in the Resulticks DB.",
       "item": [
         {
           "name": "Generate Insights — Full Manual Payload",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/insights/generate", "host": ["{{base_url}}"], "path": ["api","v1","insights","generate"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"campaign_id\": \"CMP_Q2_CC_2024\",\n  \"tenant_id\": \"TNT_HDFC\",\n  \"bu_id\": \"BU_CC\",\n  \"market_id\": \"MKT_IND_SOUTH\",\n  \"industry_id\": \"IND_BANKING\",\n\n  \"campaign_metadata\": {\n    \"campaign_name\": \"Q2 Credit Card Activation Drive\",\n    \"campaign_objective\": \"Activation\",\n    \"campaign_type\": \"Promotional\",\n    \"offer_category\": \"Cashback\",\n    \"discount_pct\": 10.0,\n    \"product_category\": \"Credit Card\",\n    \"promotion_type\": \"Discount + Points\",\n    \"journey_step_count\": 4,\n    \"communication_frequency\": 3,\n    \"execution_day_of_week\": \"Tuesday\",\n    \"execution_hour\": 10,\n    \"campaign_duration_days\": 7,\n    \"channels_used\": [\"Email\", \"SMS\", \"WhatsApp\", \"Push\"]\n  },\n\n  \"campaign_metrics\": {\n    \"reach_rate\": 0.431,\n    \"reach_target\": 0.500,\n    \"overall_conversion_rate\": 0.038,\n    \"conversion_target\": 0.045,\n    \"total_revenue\": 3840000.0,\n    \"channel_metrics\": {\n      \"email_delivered_rate\": 0.689,\n      \"email_open_rate\": 0.243,\n      \"email_click_rate\": 0.041,\n      \"email_conversion_rate\": 0.021,\n      \"email_unsubscribe_rate\": 0.006,\n      \"email_bounce_rate\": 0.124,\n      \"email_spam_rate\": 0.0008,\n      \"email_revenue_contribution\": 920000.0,\n      \"sms_delivered_rate\": 0.971,\n      \"sms_click_rate\": 0.028,\n      \"sms_conversion_rate\": 0.014,\n      \"whatsapp_open_rate\": 0.682,\n      \"whatsapp_reply_rate\": 0.031,\n      \"whatsapp_click_rate\": 0.114,\n      \"whatsapp_conversion_rate\": 0.048,\n      \"push_open_rate\": 0.091,\n      \"push_conversion_rate\": 0.009\n    }\n  },\n\n  \"audience_features\": {\n    \"segment_size\": 142500,\n    \"age_18_24_pct\": 22.0,\n    \"age_25_34_pct\": 41.0,\n    \"age_35_44_pct\": 28.0,\n    \"age_45_plus_pct\": 9.0,\n    \"avg_clv\": 84000.0,\n    \"avg_churn_probability\": 0.18,\n    \"channel_affinity_email\": 0.61,\n    \"channel_affinity_sms\": 0.44,\n    \"channel_affinity_whatsapp\": 0.82,\n    \"channel_affinity_push\": 0.55,\n    \"engagement_score\": 6.4,\n    \"propensity_score\": 0.71,\n    \"rfm_recency\": 18.0,\n    \"rfm_frequency\": 4.0,\n    \"rfm_monetary\": 84000.0,\n    \"product_ownership_count\": 2\n  },\n\n  \"historical_context\": {\n    \"avg_conversion_last_10\": 0.045,\n    \"avg_reach_last_10\": 0.492,\n    \"best_performing_channel\": \"WhatsApp\",\n    \"best_day_of_week\": \"Wednesday\",\n    \"same_segment_last_conversion\": 0.032,\n    \"same_product_avg_reach\": 0.492,\n    \"conversion_trend_slope\": -0.003\n  }\n}"
-            },
-            "description": "Full pipeline: hierarchy resolution → ML scoring → context builder → Claude LLM. Requires ANTHROPIC_API_KEY in .env."
-          }
-        },
-        {
-          "name": "Get Insights by Campaign ID",
-          "request": {
-            "method": "GET",
             "url": {
-              "raw": "{{base_url}}/api/v1/insights/CMP_Q2_CC_2024",
+              "raw": "{{base_url}}/api/v1/insights/generate",
               "host": ["{{base_url}}"],
-              "path": ["api","v1","insights","CMP_Q2_CC_2024"]
+              "path": ["api","v1","insights","generate"]
             },
-            "description": "Retrieve previously stored insights from PostgreSQL by campaign_id."
-          }
-        },
-        {
-          "name": "Generate Insights from Resulticks DB (Live Campaign)",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/insights/generate-from-campaign", "host": ["{{base_url}}"], "path": ["api","v1","insights","generate-from-campaign"] },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"campaign_id\": 12345,\n  \"tenant_short_code\": \"hUe\",\n  \"bu_id\": 0,\n  \"segmentation_list_id\": 1001\n}"
+              "raw": "{\n  \"campaign_id\": \"CMP_Q2_CC_2024\",\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"bu_id\": \"BU_CC\",\n  \"market_id\": \"MKT_IND_SOUTH\",\n  \"industry_id\": \"IND_BANKING\",\n\n  \"campaign_metadata\": {\n    \"campaign_name\": \"Q2 Credit Card Activation Drive\",\n    \"campaign_objective\": \"Activation\",\n    \"campaign_type\": \"Promotional\",\n    \"offer_category\": \"Cashback\",\n    \"discount_pct\": 10.0,\n    \"product_category\": \"Credit Card\",\n    \"promotion_type\": \"Discount + Points\",\n    \"journey_step_count\": 4,\n    \"communication_frequency\": 3,\n    \"execution_day_of_week\": \"Tuesday\",\n    \"execution_hour\": 10,\n    \"campaign_duration_days\": 7,\n    \"channels_used\": [\"Email\", \"SMS\", \"WhatsApp\", \"Push\"]\n  },\n\n  \"campaign_metrics\": {\n    \"reach_rate\": 0.431,\n    \"reach_target\": 0.500,\n    \"overall_conversion_rate\": 0.038,\n    \"conversion_target\": 0.045,\n    \"total_revenue\": 3840000.0,\n    \"channel_metrics\": {\n      \"email_delivered_rate\": 0.689,\n      \"email_open_rate\": 0.243,\n      \"email_click_rate\": 0.041,\n      \"email_conversion_rate\": 0.021,\n      \"email_unsubscribe_rate\": 0.006,\n      \"email_bounce_rate\": 0.124,\n      \"sms_delivered_rate\": 0.971,\n      \"sms_click_rate\": 0.028,\n      \"sms_conversion_rate\": 0.014,\n      \"whatsapp_open_rate\": 0.682,\n      \"whatsapp_click_rate\": 0.114,\n      \"whatsapp_conversion_rate\": 0.048,\n      \"push_open_rate\": 0.091,\n      \"push_conversion_rate\": 0.009\n    }\n  },\n\n  \"audience_features\": {\n    \"segment_size\": 142500,\n    \"age_18_24_pct\": 22.0,\n    \"age_25_34_pct\": 41.0,\n    \"age_35_44_pct\": 28.0,\n    \"age_45_plus_pct\": 9.0,\n    \"avg_clv\": 84000.0,\n    \"avg_churn_probability\": 0.18,\n    \"channel_affinity_email\": 0.61,\n    \"channel_affinity_sms\": 0.44,\n    \"channel_affinity_whatsapp\": 0.82,\n    \"channel_affinity_push\": 0.55,\n    \"engagement_score\": 6.4,\n    \"propensity_score\": 0.71,\n    \"product_ownership_count\": 2\n  },\n\n  \"historical_context\": {\n    \"avg_conversion_last_10\": 0.045,\n    \"avg_reach_last_10\": 0.492,\n    \"best_performing_channel\": \"WhatsApp\",\n    \"best_day_of_week\": \"Wednesday\",\n    \"same_segment_last_conversion\": 0.032,\n    \"conversion_trend_slope\": -0.003\n  }\n}"
             },
-            "description": "DB-driven: auto-fetches campaign data from Resulticks ProxySQL (resulticksjobdb). Use a real campaign_id from campaignmetadata table. tenant_short_code = TenantShortCode from TenantLookup."
+            "description": "Fully manual payload — all hierarchy, metadata, metrics, audience, and historical context provided explicitly.\n\nUse this when: you want to test the pipeline with synthetic data, or the campaign is not in the Resulticks DB."
           }
         }
       ]
     },
 
     {
-      "name": "4. ML Models",
+      "name": "5. ML Scoring",
+      "description": "Score a campaign across all 13 ML dimensions without calling the LLM. Use to verify model output before generating insights, or to build dashboards.",
+      "item": [
+        {
+          "name": "Score Campaign — Full 13-Dimension (Multi-Channel)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/ml/score",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","ml","score"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"bu_id\": 0,\n  \"segment_size\": 142500,\n  \"email_blast\": 98200,\n  \"email_opens\": 23862,\n  \"email_clicks\": 4026,\n  \"email_bounces\": 12177,\n  \"email_unsubs\": 589,\n  \"sms_sent\": 142500,\n  \"sms_clicks\": 3990,\n  \"campaign_type_code\": \"M\",\n  \"campaign_duration_days\": 7,\n  \"industry_id\": 0,\n  \"email_open_rate\": 0.243,\n  \"email_click_rate\": 0.041,\n  \"sms_click_rate\": 0.028\n}"
+            },
+            "description": "Returns all 13 ML scores (0–1 normalised), scope_used, anomaly_flags, and model_confidence.\n\ncampaign_type_code: M=Promotional, S=Triggered, T=Transactional\n\nPaste the returned scores into the generate-ollama body for richest insight quality.",
+            "response": [
+              {
+                "name": "200 — Scores",
+                "status": "OK",
+                "code": 200,
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": "{\n  \"scope_used\": \"BU\",\n  \"model_confidence\": 0.83,\n  \"anomaly_flags\": [\"hard_bounce_rate_above_bu_avg\"],\n  \"scores\": {\n    \"reach_score\": 0.52,\n    \"engagement_quality_score\": 0.74,\n    \"channel_efficiency_email\": 0.48,\n    \"channel_efficiency_sms\": 0.61,\n    \"audience_fit_score\": 0.79,\n    \"timing_quality_score\": 0.61,\n    \"journey_effectiveness\": 0.68,\n    \"frequency_risk_score\": 0.44,\n    \"churn_signal_score\": 0.21,\n    \"cross_sell_opportunity\": 0.87,\n    \"conversion_probability\": 0.71\n  }\n}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Score Campaign — Email Only (Minimal)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/ml/score",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","ml","score"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"bu_id\": 0,\n  \"segment_size\": 20000,\n  \"email_blast\": 18000,\n  \"email_opens\": 3600,\n  \"email_clicks\": 540,\n  \"email_bounces\": 360,\n  \"email_unsubs\": 36,\n  \"sms_sent\": 0,\n  \"sms_clicks\": 0,\n  \"campaign_type_code\": \"T\",\n  \"campaign_duration_days\": 3,\n  \"industry_id\": 0\n}"
+            },
+            "description": "Minimal scoring — email only, Transactional type. Rates auto-derived from counts when not provided."
+          }
+        },
+        {
+          "name": "Score Campaign — Triggered (Event-Based)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/ml/score",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","ml","score"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"bu_id\": 0,\n  \"segment_size\": 5000,\n  \"email_blast\": 5000,\n  \"email_opens\": 1500,\n  \"email_clicks\": 600,\n  \"email_bounces\": 50,\n  \"email_unsubs\": 10,\n  \"sms_sent\": 5000,\n  \"sms_clicks\": 350,\n  \"campaign_type_code\": \"S\",\n  \"campaign_duration_days\": 1,\n  \"industry_id\": 0\n}"
+            },
+            "description": "Small triggered/event-based campaign. High open rate expected. campaign_type_code=S."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "6. ML Predict",
+      "description": "Direct XGBoost/LightGBM prediction — returns raw model outputs and normalised score quantiles per target dimension. Lower-level than /score.",
+      "item": [
+        {
+          "name": "Predict — Email Campaign",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/ml/predict",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","ml","predict"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"bu_id\": 0,\n  \"segment_size\": 50000,\n  \"email_blast\": 42000,\n  \"email_opens\": 8400,\n  \"email_clicks\": 1260,\n  \"email_bounces\": 630,\n  \"email_unsubs\": 84,\n  \"sms_sent\": 0,\n  \"sms_clicks\": 0,\n  \"campaign_type_code\": \"M\",\n  \"campaign_duration_days\": 7,\n  \"industry_id\": 0\n}"
+            },
+            "description": "Returns raw per-target predictions + normalised quantile scores. campaign_type_code: M=Promotional, S=Triggered, T=Transactional."
+          }
+        },
+        {
+          "name": "Predict — Multi-Channel Campaign",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/ml/predict",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","ml","predict"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"bu_id\": 0,\n  \"segment_size\": 142500,\n  \"email_blast\": 98200,\n  \"email_opens\": 23862,\n  \"email_clicks\": 4026,\n  \"email_bounces\": 12177,\n  \"email_unsubs\": 589,\n  \"sms_sent\": 142500,\n  \"sms_clicks\": 3990,\n  \"campaign_type_code\": \"M\",\n  \"campaign_duration_days\": 7,\n  \"industry_id\": 0\n}"
+            },
+            "description": "Email + SMS together."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "7. ML Models",
+      "description": "List trained model bundles and inspect per-scope metadata.",
       "item": [
         {
           "name": "List All Trained Models",
           "request": {
             "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/ml/models", "host": ["{{base_url}}"], "path": ["api","v1","ml","models"] },
-            "description": "Returns all .joblib model bundles with metadata: scope, target, n_samples, val_mae, val_r2, trained_at."
+            "url": {
+              "raw": "{{base_url}}/api/v1/ml/models",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","ml","models"]
+            },
+            "description": "Returns all .joblib bundles found in ml/trained_models/. Each entry shows scope, scope_id, target, n_samples, val_mae, val_r2, trained_at."
           }
         },
         {
-          "name": "Get Model Info — BU Scope (Trained Tenant)",
+          "name": "Get Model Info — BU Scope",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{base_url}}/api/v1/ml/models/BU/00b4e220_6121_4a93_a63f_d0848bd73506_0",
+              "raw": "{{base_url}}/api/v1/ml/models/BU/{{tenant_id}}_0",
               "host": ["{{base_url}}"],
-              "path": ["api","v1","ml","models","BU","00b4e220_6121_4a93_a63f_d0848bd73506_0"]
+              "path": ["api","v1","ml","models","BU","{{tenant_id}}_0"]
             },
-            "description": "Returns all trained targets for BU scope. scope_id format = {tenant_uuid}_{bu_id}."
+            "description": "scope_id format for BU: {tenant_uuid}_{bu_id}\nExample: 00b4e220_6121_4a93_a63f_d0848bd73506_0"
           }
         },
         {
@@ -164,11 +392,23 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{base_url}}/api/v1/ml/models/Tenant/00b4e220_6121_4a93_a63f_d0848bd73506",
+              "raw": "{{base_url}}/api/v1/ml/models/Tenant/{{tenant_id}}",
               "host": ["{{base_url}}"],
-              "path": ["api","v1","ml","models","Tenant","00b4e220_6121_4a93_a63f_d0848bd73506"]
+              "path": ["api","v1","ml","models","Tenant","{{tenant_id}}"]
             },
-            "description": "Returns all trained targets for Tenant scope."
+            "description": "scope_id = tenant UUID."
+          }
+        },
+        {
+          "name": "Get Model Info — Market Scope",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/ml/models/Market/MKT_IND_SOUTH",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","ml","models","Market","MKT_IND_SOUTH"]
+            },
+            "description": "Market-level XGBoost model. scope_id = market identifier string."
           }
         },
         {
@@ -180,220 +420,167 @@
               "host": ["{{base_url}}"],
               "path": ["api","v1","ml","models","Industry","global"]
             },
-            "description": "Returns Industry-level LightGBM model bundles."
+            "description": "Industry-level LightGBM fallback model. scope_id is typically 'global' or an industry code."
           }
         },
         {
           "name": "Invalidate Model Cache",
           "request": {
             "method": "DELETE",
-            "url": { "raw": "{{base_url}}/api/v1/ml/models/cache", "host": ["{{base_url}}"], "path": ["api","v1","ml","models","cache"] },
-            "description": "Clears the in-memory model cache. Run after retraining to force fresh load."
+            "url": {
+              "raw": "{{base_url}}/api/v1/ml/models/cache",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","ml","models","cache"]
+            },
+            "description": "Clears the in-memory model cache. Run immediately after retraining new .joblib bundles so the next request loads the fresh models."
           }
         }
       ]
     },
 
     {
-      "name": "5. ML Predict & Score",
+      "name": "8. Benchmarks",
+      "description": "Retrieve benchmark profiles for a scope. Used by the ML scorer to compute delta_vs_bu, delta_vs_industry, and percentile_rank.",
       "item": [
         {
-          "name": "Predict — Email Campaign (Trained Tenant BU)",
+          "name": "Industry — Banking",
           "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/ml/predict", "host": ["{{base_url}}"], "path": ["api","v1","ml","predict"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tenant_id\": \"00b4e220_6121_4a93_a63f_d0848bd73506\",\n  \"bu_id\": 0,\n  \"segment_size\": 50000,\n  \"email_blast\": 42000,\n  \"email_opens\": 8400,\n  \"email_clicks\": 1260,\n  \"email_bounces\": 630,\n  \"email_unsubs\": 84,\n  \"sms_sent\": 0,\n  \"sms_clicks\": 0,\n  \"campaign_type_code\": \"M\",\n  \"campaign_duration_days\": 7,\n  \"industry_id\": 0\n}"
-            },
-            "description": "Direct XGBoost prediction for email-only campaign. Returns raw predictions + normalized scores + quantiles per target. campaign_type_code: M=Promotional, S=Triggered, T=Transactional."
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/benchmarks/industry/IND_BANKING",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","benchmarks","industry","IND_BANKING"]
+            }
           }
         },
         {
-          "name": "Predict — Multi-Channel Campaign",
+          "name": "Industry — Retail",
           "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/ml/predict", "host": ["{{base_url}}"], "path": ["api","v1","ml","predict"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tenant_id\": \"00b4e220_6121_4a93_a63f_d0848bd73506\",\n  \"bu_id\": 0,\n  \"segment_size\": 142500,\n  \"email_blast\": 98200,\n  \"email_opens\": 23862,\n  \"email_clicks\": 4026,\n  \"email_bounces\": 12177,\n  \"email_unsubs\": 589,\n  \"sms_sent\": 142500,\n  \"sms_clicks\": 3990,\n  \"campaign_type_code\": \"M\",\n  \"campaign_duration_days\": 7,\n  \"industry_id\": 0\n}"
-            },
-            "description": "Multi-channel campaign prediction — email + SMS together."
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/benchmarks/industry/IND_RETAIL",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","benchmarks","industry","IND_RETAIL"]
+            }
           }
         },
         {
-          "name": "Predict — Triggered Campaign",
+          "name": "Industry — Telecom",
           "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/ml/predict", "host": ["{{base_url}}"], "path": ["api","v1","ml","predict"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tenant_id\": \"00b4e220_6121_4a93_a63f_d0848bd73506\",\n  \"bu_id\": 0,\n  \"segment_size\": 5000,\n  \"email_blast\": 5000,\n  \"email_opens\": 1500,\n  \"email_clicks\": 600,\n  \"email_bounces\": 50,\n  \"email_unsubs\": 10,\n  \"sms_sent\": 5000,\n  \"sms_clicks\": 350,\n  \"campaign_type_code\": \"S\",\n  \"campaign_duration_days\": 1,\n  \"industry_id\": 0\n}"
-            },
-            "description": "Triggered (event-based) campaign. campaign_type_code=S."
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/benchmarks/industry/IND_TELECOM",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","benchmarks","industry","IND_TELECOM"]
+            }
           }
         },
         {
-          "name": "Score Campaign — Full 13-Dimension",
+          "name": "Tenant — hUe (Trained Tenant)",
           "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/ml/score", "host": ["{{base_url}}"], "path": ["api","v1","ml","score"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tenant_id\": \"00b4e220_6121_4a93_a63f_d0848bd73506\",\n  \"bu_id\": 0,\n  \"segment_size\": 142500,\n  \"email_blast\": 98200,\n  \"email_opens\": 23862,\n  \"email_clicks\": 4026,\n  \"sms_sent\": 142500,\n  \"sms_clicks\": 3990,\n  \"campaign_type_code\": \"M\",\n  \"campaign_duration_days\": 7,\n  \"industry_id\": 0,\n  \"email_open_rate\": 0.243,\n  \"email_click_rate\": 0.041,\n  \"sms_click_rate\": 0.028\n}"
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/benchmarks/tenant/{{tenant_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","benchmarks","tenant","{{tenant_id}}"]
             },
-            "description": "Returns all 13 ML scores without calling the LLM. Use to verify ML scores before generating insights. Includes scope_used, reach, engagement, channel efficiency, audience fit, timing, journey, frequency risk, churn, cross-sell, conversion."
+            "description": "Benchmark profile for the trained tenant (UUID 00b4e220_6121_4a93_a63f_d0848bd73506, short-code hUe)."
           }
         },
         {
-          "name": "Score Campaign — Minimal (Rates Only)",
+          "name": "Market — India South",
           "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/ml/score", "host": ["{{base_url}}"], "path": ["api","v1","ml","score"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tenant_id\": \"00b4e220_6121_4a93_a63f_d0848bd73506\",\n  \"bu_id\": 0,\n  \"segment_size\": 20000,\n  \"email_blast\": 18000,\n  \"email_opens\": 3600,\n  \"email_clicks\": 540,\n  \"sms_sent\": 0,\n  \"sms_clicks\": 0,\n  \"campaign_type_code\": \"T\",\n  \"campaign_duration_days\": 3,\n  \"industry_id\": 0\n}"
-            },
-            "description": "Minimal scoring without pre-computed rates. Rates auto-derived from counts."
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/benchmarks/market/MKT_IND_SOUTH",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","benchmarks","market","MKT_IND_SOUTH"]
+            }
+          }
+        },
+        {
+          "name": "Market — India North",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/benchmarks/market/MKT_IND_NORTH",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","benchmarks","market","MKT_IND_NORTH"]
+            }
+          }
+        },
+        {
+          "name": "Market — APAC",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/benchmarks/market/MKT_APAC",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","benchmarks","market","MKT_APAC"]
+            }
+          }
+        },
+        {
+          "name": "BU — Credit Cards",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/benchmarks/bu/BU_CC",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","benchmarks","bu","BU_CC"]
+            }
+          }
+        },
+        {
+          "name": "BU — Home Loans",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/benchmarks/bu/BU_HL",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","benchmarks","bu","BU_HL"]
+            }
           }
         }
       ]
     },
 
     {
-      "name": "6. Benchmarks",
+      "name": "9. End-to-End Workflow",
+      "description": "Two-step workflow: score first, then paste ML scores into generate-ollama for the richest possible insight quality.",
       "item": [
         {
-          "name": "Get Benchmarks — Industry: Banking",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/industry/IND_BANKING", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","industry","IND_BANKING"] },
-            "description": "Returns banking industry benchmark averages."
-          }
-        },
-        {
-          "name": "Get Benchmarks — Industry: Retail",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/industry/IND_RETAIL", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","industry","IND_RETAIL"] },
-            "description": "Returns retail industry benchmark averages."
-          }
-        },
-        {
-          "name": "Get Benchmarks — Industry: Telecom",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/industry/IND_TELECOM", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","industry","IND_TELECOM"] },
-            "description": "Returns telecom industry benchmark averages."
-          }
-        },
-        {
-          "name": "Get Benchmarks — BU: Credit Cards",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/bu/BU_CC", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","bu","BU_CC"] },
-            "description": "Returns Credit Card BU benchmark averages."
-          }
-        },
-        {
-          "name": "Get Benchmarks — BU: Home Loans",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/bu/BU_HL", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","bu","BU_HL"] },
-            "description": "Returns Home Loans BU benchmark averages."
-          }
-        },
-        {
-          "name": "Get Benchmarks — BU: Mobile",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/bu/BU_MOBILE", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","bu","BU_MOBILE"] }
-          }
-        },
-        {
-          "name": "Get Benchmarks — BU: E-Commerce",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/bu/BU_ECOMM", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","bu","BU_ECOMM"] }
-          }
-        },
-        {
-          "name": "Get Benchmarks — Tenant: HDFC",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/tenant/TNT_HDFC", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","tenant","TNT_HDFC"] }
-          }
-        },
-        {
-          "name": "Get Benchmarks — Tenant: Airtel",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/tenant/TNT_AIRTEL", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","tenant","TNT_AIRTEL"] }
-          }
-        },
-        {
-          "name": "Get Benchmarks — Tenant: Flipkart",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/tenant/TNT_FLIPKART", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","tenant","TNT_FLIPKART"] }
-          }
-        },
-        {
-          "name": "Get Benchmarks — Market: India South",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/market/MKT_IND_SOUTH", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","market","MKT_IND_SOUTH"] }
-          }
-        },
-        {
-          "name": "Get Benchmarks — Market: India North",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/market/MKT_IND_NORTH", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","market","MKT_IND_NORTH"] }
-          }
-        },
-        {
-          "name": "Get Benchmarks — Market: APAC",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/api/v1/benchmarks/market/MKT_APAC", "host": ["{{base_url}}"], "path": ["api","v1","benchmarks","market","MKT_APAC"] }
-          }
-        }
-      ]
-    },
-
-    {
-      "name": "7. End-to-End Workflows",
-      "item": [
-        {
-          "name": "Step 1 — Score Campaign First",
+          "name": "Step 1 — Score Campaign",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/ml/score", "host": ["{{base_url}}"], "path": ["api","v1","ml","score"] },
+            "url": {
+              "raw": "{{base_url}}/api/v1/ml/score",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","ml","score"]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tenant_id\": \"00b4e220_6121_4a93_a63f_d0848bd73506\",\n  \"bu_id\": 0,\n  \"segment_size\": 142500,\n  \"email_blast\": 98200,\n  \"email_opens\": 23862,\n  \"email_clicks\": 4026,\n  \"sms_sent\": 142500,\n  \"sms_clicks\": 3990,\n  \"campaign_type_code\": \"M\",\n  \"campaign_duration_days\": 7,\n  \"industry_id\": 0\n}"
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"bu_id\": 0,\n  \"segment_size\": 142500,\n  \"email_blast\": 98200,\n  \"email_opens\": 23862,\n  \"email_clicks\": 4026,\n  \"email_bounces\": 12177,\n  \"email_unsubs\": 589,\n  \"sms_sent\": 142500,\n  \"sms_clicks\": 3990,\n  \"campaign_type_code\": \"M\",\n  \"campaign_duration_days\": 7,\n  \"industry_id\": 0\n}"
             },
-            "description": "WORKFLOW STEP 1: Get ML scores first. Copy the scores into Step 2."
+            "description": "WORKFLOW STEP 1 of 2.\n\nRun this first. Copy the returned scores (reach_score, engagement_quality_score, …) into Step 2's body."
           }
         },
         {
-          "name": "Step 2 — Generate Ollama Insights with ML Scores",
+          "name": "Step 2 — Generate Insights with ML Scores",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/insights/generate-ollama", "host": ["{{base_url}}"], "path": ["api","v1","insights","generate-ollama"] },
+            "url": {
+              "raw": "{{base_url}}/api/v1/insights/generate-ollama",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","insights","generate-ollama"]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tenant_id\": \"00b4e220_6121_4a93_a63f_d0848bd73506\",\n  \"tenant_name\": \"Resulticks Demo\",\n  \"bu_id\": 0,\n  \"bu_name\": \"Credit Cards\",\n  \"industry_name\": \"Banking & Financial Services\",\n  \"campaign_name\": \"Q2 Credit Card Activation Drive\",\n  \"campaign_type\": \"Promotional\",\n\n  \"segment_size\": 142500,\n  \"audience_reach\": 61493,\n\n  \"email_sent\": 98200,\n  \"email_opens\": 23862,\n  \"email_clicks\": 4026,\n  \"email_bounces\": 12177,\n  \"email_unsubs\": 589,\n\n  \"sms_sent\": 142500,\n  \"sms_clicks\": 3990,\n\n  \"wa_sent\": 142500,\n  \"wa_delivered\": 114000,\n  \"wa_clicks\": 12996,\n\n  \"reach_score\": 0.52,\n  \"engagement_quality_score\": 0.74,\n  \"channel_efficiency_email\": 0.48,\n  \"channel_efficiency_sms\": 0.61,\n  \"audience_fit_score\": 0.79,\n  \"timing_quality_score\": 0.61,\n  \"journey_effectiveness\": 0.68,\n  \"frequency_risk_score\": 0.44,\n  \"churn_signal_score\": 0.21,\n  \"cross_sell_opportunity\": 0.87,\n  \"conversion_probability\": 0.71,\n  \"model_confidence\": 0.89,\n\n  \"benchmark_delta_vs_bu\": -0.7,\n  \"benchmark_delta_vs_industry\": 0.8,\n  \"percentile_rank_industry\": 61.0,\n\n  \"anomaly_flags\": [\n    \"hard_bounce_rate_3x_above_bu_avg\",\n    \"whatsapp_ctr_2.4x_above_industry\"\n  ],\n\n  \"min_confidence\": 60,\n  \"scope\": \"BU\"\n}"
+              "raw": "{\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"tenant_name\": \"Resulticks Demo\",\n  \"bu_id\": 0,\n  \"bu_name\": \"Credit Cards\",\n  \"industry_name\": \"Banking & Financial Services\",\n  \"campaign_name\": \"Q2 Credit Card Activation Drive\",\n  \"campaign_type\": \"Promotional\",\n\n  \"segment_size\": 142500,\n  \"audience_reach\": 61493,\n\n  \"email_sent\": 98200,\n  \"email_opens\": 23862,\n  \"email_clicks\": 4026,\n  \"email_bounces\": 12177,\n  \"email_unsubs\": 589,\n\n  \"sms_sent\": 142500,\n  \"sms_clicks\": 3990,\n\n  \"wa_sent\": 142500,\n  \"wa_delivered\": 114000,\n  \"wa_clicks\": 12996,\n\n  \"reach_score\": 0.52,\n  \"engagement_quality_score\": 0.74,\n  \"channel_efficiency_email\": 0.48,\n  \"channel_efficiency_sms\": 0.61,\n  \"audience_fit_score\": 0.79,\n  \"timing_quality_score\": 0.61,\n  \"journey_effectiveness\": 0.68,\n  \"frequency_risk_score\": 0.44,\n  \"churn_signal_score\": 0.21,\n  \"cross_sell_opportunity\": 0.87,\n  \"conversion_probability\": 0.71,\n  \"model_confidence\": 0.89,\n\n  \"benchmark_delta_vs_bu\": -0.7,\n  \"benchmark_delta_vs_industry\": 0.8,\n  \"percentile_rank_industry\": 61.0,\n\n  \"anomaly_flags\": [\n    \"hard_bounce_rate_above_bu_avg\",\n    \"whatsapp_ctr_above_industry\"\n  ],\n\n  \"min_confidence\": 60,\n  \"scope\": \"BU\"\n}"
             },
-            "description": "WORKFLOW STEP 2: Paste ML scores from Step 1 here to generate Ollama insights enriched with model data."
+            "description": "WORKFLOW STEP 2 of 2.\n\nPaste the ML scores from Step 1 into the corresponding fields here. The scores you copied replace the placeholder values above."
           }
         }
       ]
