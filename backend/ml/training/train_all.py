@@ -151,29 +151,46 @@ def train_all_active():
 
     summary = []   # (tenant_id, scope, scope_id, n_models)
 
+    skipped = []
+
     for _, tenant_row in tenants.iterrows():
         tid = str(tenant_row["TenantID"])
         short = tenant_row["TenantShortCode"]
 
         # ── Tenant-level model ────────────────────────────────────────────
         log.info("Training Tenant model  T1=%s (%s)", tid[:8], short)
-        df_t = load_tenant_training_data(tid, **db)
-        if not df_t.empty:
-            X, y_dict = _build_arrays(df_t)
-            if X is not None:
-                saved = train_scope(X, y_dict, "Tenant", tid)
-                summary.append((tid[:8], "Tenant", tid[:8], len(saved)))
+        try:
+            df_t = load_tenant_training_data(tid, **db)
+            if not df_t.empty:
+                X, y_dict = _build_arrays(df_t)
+                if X is not None:
+                    saved = train_scope(X, y_dict, "Tenant", tid)
+                    summary.append((tid[:8], "Tenant", tid[:8], len(saved)))
+        except Exception as exc:
+            log.warning("  Skipping Tenant %s (%s): %s", tid[:8], short, exc)
+            skipped.append((tid[:8], short, str(exc)[:80]))
+            continue
 
         # ── BU-level models ───────────────────────────────────────────────
-        bus = load_tenant_bus(tid, **db)
+        try:
+            bus = load_tenant_bus(tid, **db)
+        except Exception as exc:
+            log.warning("  Skipping BU discovery for %s: %s", tid[:8], exc)
+            skipped.append((tid[:8], short, f"BU discovery: {exc}"[:80]))
+            continue
+
         for bu_id in bus:
             log.info("  Training BU model  T1=%s B1=%d", tid[:8], bu_id)
-            df_b = load_bu_training_data(tid, bu_id, **db)
-            if not df_b.empty:
-                X, y_dict = _build_arrays(df_b)
-                if X is not None:
-                    saved = train_scope(X, y_dict, "BU", f"{tid}_{bu_id}")
-                    summary.append((tid[:8], "BU", f"{tid[:8]}_{bu_id}", len(saved)))
+            try:
+                df_b = load_bu_training_data(tid, bu_id, **db)
+                if not df_b.empty:
+                    X, y_dict = _build_arrays(df_b)
+                    if X is not None:
+                        saved = train_scope(X, y_dict, "BU", f"{tid}_{bu_id}")
+                        summary.append((tid[:8], "BU", f"{tid[:8]}_{bu_id}", len(saved)))
+            except Exception as exc:
+                log.warning("  Skipping BU %d for %s: %s", bu_id, tid[:8], exc)
+                skipped.append((tid[:8], short, f"BU {bu_id}: {exc}"[:80]))
 
     # ── Summary ───────────────────────────────────────────────────────────
     log.info("")
@@ -184,6 +201,11 @@ def train_all_active():
         log.info("%-12s  %-10s  %-18s  %d", tid, scope, sid, n)
     log.info("")
     log.info("Total model bundles saved: %d", sum(n for *_, n in summary))
+    if skipped:
+        log.info("")
+        log.info("Skipped (%d):", len(skipped))
+        for tid, short, reason in skipped:
+            log.info("  %-12s %-6s  %s", tid, short, reason)
 
 
 

@@ -57,7 +57,8 @@ _TENANT_BUS_SQL = """
 SELECT DISTINCT COALESCE(cm.DepartmentId, 0) AS bu_id
 FROM campaignmetadata cm
 JOIN CampaignJobMetaData cjm ON cjm.CampaignID = cm.CampaignID
-                              AND cjm.DatabaseName = CONCAT('cust_', %s)
+    AND (cjm.DatabaseName = CONCAT('cust_', %s)
+      OR cjm.DatabaseName = CONCAT('camp_', %s))
 WHERE cm.DepartmentId IS NOT NULL AND cm.DepartmentId > 0
 """
 
@@ -104,8 +105,9 @@ SELECT
 
 FROM campaignmetadata cm
 JOIN CampaignJobMetaData cjm ON cjm.CampaignID = cm.CampaignID
-                              AND cjm.DatabaseName LIKE 'cust_%%'
-JOIN TenantLookup tl ON tl.TenantID = REPLACE(cjm.DatabaseName, 'cust_', '')
+    AND (cjm.DatabaseName LIKE 'cust_%%' OR cjm.DatabaseName LIKE 'camp_%%')
+JOIN TenantLookup tl
+    ON tl.TenantID = REPLACE(REPLACE(cjm.DatabaseName, 'cust_', ''), 'camp_', '')
 LEFT JOIN ccampaign c ON c.CampaignID = cm.CampaignID
 LEFT JOIN resulticksmaster.mclient mc ON mc.ClientID = tl.ClientID
 LEFT JOIN CampaignJobData cjd ON cjd.CampaignID = cm.CampaignID
@@ -131,21 +133,34 @@ LIMIT {limit}
 def _load_sync(
     sql: str, params: tuple,
     host: str, port: int, user: str, password: str, db: str,
+    _retries: int = 2,
 ) -> pd.DataFrame:
     import pymysql
-    conn = pymysql.connect(
-        host=host, port=port, user=user, password=password,
-        database=db, charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-        connect_timeout=30,
-    )
-    try:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            rows = cur.fetchall()
-        return pd.DataFrame(rows) if rows else pd.DataFrame()
-    finally:
-        conn.close()
+    import time
+    last_exc = None
+    for attempt in range(_retries):
+        if attempt > 0:
+            time.sleep(5 * attempt)
+        try:
+            conn = pymysql.connect(
+                host=host, port=port, user=user, password=password,
+                database=db, charset="utf8mb4",
+                cursorclass=pymysql.cursors.DictCursor,
+                connect_timeout=30,
+                read_timeout=120,
+                write_timeout=60,
+            )
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(sql, params)
+                    rows = cur.fetchall()
+                return pd.DataFrame(rows) if rows else pd.DataFrame()
+            finally:
+                conn.close()
+        except pymysql.err.OperationalError as exc:
+            last_exc = exc
+            log.warning("DB connection lost (attempt %d/%d): %s", attempt + 1, _retries, exc)
+    raise last_exc
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -172,7 +187,7 @@ def load_tenant_bus(
     Returns BU IDs that have campaignmetadata entries for this tenant.
     Falls back to [0] if none found (default BU).
     """
-    df = _load_sync(_TENANT_BUS_SQL, (tenant_id,), host, port, user, password, db)
+    df = _load_sync(_TENANT_BUS_SQL, (tenant_id, tenant_id), host, port, user, password, db)
     if df.empty:
         return [0]
     bus = [int(x) for x in df["bu_id"].dropna().unique().tolist()]
@@ -258,7 +273,8 @@ def load_historical_context(
             DAYOFWEEK(cm.StartDate)                                         AS blast_dow
         FROM campaignmetadata cm
         JOIN CampaignJobMetaData cjm ON cjm.CampaignID = cm.CampaignID
-                                     AND cjm.DatabaseName = CONCAT('cust_', %s)
+            AND (cjm.DatabaseName = CONCAT('cust_', %s)
+              OR cjm.DatabaseName = CONCAT('camp_', %s))
         LEFT JOIN CampaignJobData cjd ON cjd.CampaignID = cm.CampaignID
         WHERE cm.CampaignID != %s
           AND cm.BlastCount17 IS NOT NULL AND cm.BlastCount17 != ''
@@ -266,7 +282,7 @@ def load_historical_context(
         ORDER BY cm.CampaignID DESC
         LIMIT %s
     """
-    df = _load_sync(sql, (tenant_id, campaign_id, lookback), host, port, user, password, db)
+    df = _load_sync(sql, (tenant_id, tenant_id, campaign_id, lookback), host, port, user, password, db)
     if df.empty:
         return {}
 
