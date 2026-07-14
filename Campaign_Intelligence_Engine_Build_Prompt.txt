@@ -1,0 +1,695 @@
+================================================================================
+   CAMPAIGN PERFORMANCE INTELLIGENCE ENGINE - FULL BUILD PROMPT
+   Resulticks Solution Inc.
+   Hierarchy: Industry --> Market --> Tenant --> BU
+================================================================================
+
+
+================================================================================
+SECTION 1: PRODUCT OVERVIEW
+================================================================================
+
+Build a multi-tenant, hierarchically scoped AI-Powered Campaign Performance
+Intelligence Engine that ingests campaign data at 4 levels:
+
+    Industry --> Market --> Tenant --> Business Unit (BU)
+
+The system builds a rich ML context from trained models at each level, and feeds
+that context into an LLM to generate structured, actionable campaign insights
+inside the Campaign Summary Report (CSR).
+
+
+================================================================================
+SECTION 2: ARCHITECTURE OVERVIEW
+================================================================================
+
++----------------------------------------------------------+
+|                  DATA INGESTION LAYER                    |
+|   Campaign Inputs + Metrics (per campaign execution)     |
++-------------------------+--------------------------------+
+                          |
++-------------------------v--------------------------------+
+|             HIERARCHY RESOLUTION ENGINE                  |
+|                                                          |
+|   Industry Level  (e.g. Banking, Retail, Telecom)        |
+|        |                                                 |
+|   Market Level    (e.g. India - South, APAC, US)         |
+|        |                                                 |
+|   Tenant Level    (e.g. HDFC, Flipkart, Airtel)          |
+|        |                                                 |
+|   BU Level        (e.g. Credit Cards, Home Loans)        |
++-------------------------+--------------------------------+
+                          |
++-------------------------v--------------------------------+
+|             ML FEATURE EXTRACTION LAYER                  |
+|   Trained ML models per scope level                      |
+|   Output: Scored Feature Vector (150-500 features)       |
++-------------------------+--------------------------------+
+                          |
++-------------------------v--------------------------------+
+|             CONTEXT BUILDER                              |
+|   Merges ML scores + raw metrics + benchmark deltas      |
+|   into a structured prompt context block                 |
++-------------------------+--------------------------------+
+                          |
++-------------------------v--------------------------------+
+|             LLM INSIGHT GENERATION LAYER                 |
+|   System prompt (role + rules + schema)                  |
+|   + Context block --> Claude                             |
+|   Output: 10-category structured insights (JSON)         |
++-------------------------+--------------------------------+
+                          |
++-------------------------v--------------------------------+
+|             CSR DISPLAY LAYER                            |
+|   Insight cards rendered inside Campaign Summary Report  |
++----------------------------------------------------------+
+
+
+================================================================================
+SECTION 3: HIERARCHY MODEL
+================================================================================
+
+SCOPE RESOLUTION ORDER
+----------------------
+Each campaign is resolved through all 4 levels. The ML model and benchmarks
+are pulled from the most specific scope available, falling back upward if
+data is insufficient.
+
+    BU Level           --> Primary scope (most specific)
+        ^ fallback
+    Tenant Level       --> Secondary scope
+        ^ fallback
+    Market Level       --> Tertiary scope
+        ^ fallback
+    Industry Level     --> Base scope (broadest benchmarks)
+
+
+HIERARCHY SCHEMA
+----------------
+{
+  "industry": {
+    "id": "IND_BANKING",
+    "name": "Banking & Financial Services",
+    "benchmark_profile": { ... }
+  },
+  "market": {
+    "id": "MKT_IND_SOUTH",
+    "name": "India - South",
+    "industry_id": "IND_BANKING",
+    "regional_benchmark_profile": { ... }
+  },
+  "tenant": {
+    "id": "TNT_HDFC",
+    "name": "HDFC Bank",
+    "market_id": "MKT_IND_SOUTH",
+    "tenant_benchmark_profile": { ... },
+    "ml_model_version": "v3.2.1"
+  },
+  "business_unit": {
+    "id": "BU_CC",
+    "name": "Credit Cards",
+    "tenant_id": "TNT_HDFC",
+    "product_category": "Credit Card",
+    "bu_benchmark_profile": { ... },
+    "ml_model_version": "v1.8.0"
+  }
+}
+
+
+================================================================================
+SECTION 4: ML MODEL LAYER
+================================================================================
+
+4.1 WHAT THE ML MODELS DO
+--------------------------
+Each scope level has a trained model. All models produce a scored feature
+vector - not a prediction alone, but a rich set of scored signals about
+the campaign.
+
+ML Model Input:
+  - Campaign metadata
+  - Audience features (from CDP)
+  - Channel performance metrics
+  - Journey execution data
+  - Historical campaign data (same scope)
+
+ML Model Output (Feature Vector):
+  - reach_score               --> 0.0-1.0
+  - engagement_quality_score  --> 0.0-1.0
+  - channel_efficiency_score  --> per channel
+  - audience_fit_score        --> 0.0-1.0
+  - timing_quality_score      --> 0.0-1.0
+  - journey_effectiveness     --> 0.0-1.0
+  - frequency_risk_score      --> 0.0-1.0
+  - churn_signal_score        --> 0.0-1.0
+  - cross_sell_opportunity    --> 0.0-1.0
+  - conversion_probability    --> 0.0-1.0
+  - benchmark_delta           --> % above/below peer average
+  - anomaly_flags             --> list of detected anomalies
+
+
+4.2 MODEL TYPES PER SCOPE
+--------------------------
+Scope      | Model Type                   | Trained On                        | Purpose
+-----------|------------------------------|-----------------------------------|--------------------------------
+Industry   | XGBoost / LightGBM           | All tenants in industry           | Industry-wide patterns/baselines
+Market     | XGBoost + Regional Features  | All tenants in market             | Regional behavioral patterns
+Tenant     | Fine-tuned Gradient Boosting | Tenant's own historical campaigns | Tenant-specific fingerprint
+BU         | Fine-tuned + Product-aware   | BU's campaigns only               | Most precise product-level score
+
+
+4.3 FEATURE CATEGORIES (150-500 features per campaign)
+-------------------------------------------------------
+Audience Features (40-80):
+  segment_size, age_distribution, gender_mix, affluence_index,
+  geography_code, device_preference, product_ownership_count,
+  engagement_score, rfm_recency, rfm_frequency, rfm_monetary,
+  propensity_score, clv, churn_probability, channel_affinity_email,
+  channel_affinity_sms, channel_affinity_whatsapp, preferred_hour,
+  previous_campaign_response_rate, days_since_last_purchase ...
+
+Campaign Features (20-40):
+  campaign_objective_encoded, campaign_type_encoded, offer_category,
+  discount_pct, urgency_flag, promotion_type, journey_step_count,
+  communication_frequency, execution_day_of_week, execution_hour,
+  campaign_duration_days, industry_vertical, product_category ...
+
+Channel Features (30-60, per channel):
+  email_delivered_rate, email_open_rate, email_click_rate,
+  email_conversion_rate, email_unsubscribe_rate, email_bounce_rate,
+  email_spam_rate, email_revenue_contribution,
+  sms_delivered_rate, sms_click_rate, sms_conversion_rate,
+  whatsapp_open_rate, whatsapp_reply_rate, whatsapp_conversion_rate,
+  push_open_rate, push_conversion_rate ...
+
+Historical Features (20-40):
+  avg_reach_last_10, avg_conversion_last_10,
+  best_performing_channel_last_5, avg_open_rate_same_segment,
+  avg_revenue_same_product, conversion_trend_slope,
+  best_day_of_week_historically, best_hour_historically ...
+
+Benchmark Delta Features (20-40):
+  delta_vs_tenant_avg, delta_vs_bu_avg, delta_vs_market_avg,
+  delta_vs_industry_avg, percentile_rank_in_tenant,
+  percentile_rank_in_industry ...
+
+
+================================================================================
+SECTION 5: CONTEXT BUILDER
+================================================================================
+
+The Context Builder takes the ML Feature Vector + Raw Metrics + Benchmark
+Deltas and assembles a structured text block that is fed to the LLM.
+
+CONTEXT BLOCK SCHEMA (Example)
+-------------------------------
+
+=== CAMPAIGN PERFORMANCE CONTEXT ===
+
+[HIERARCHY]
+Industry  : Banking & Financial Services
+Market    : India - South
+Tenant    : HDFC Bank
+BU        : Credit Cards
+ML Scope  : BU-level model v1.8.0 (fell back to Tenant for timing features)
+
+[CAMPAIGN METADATA]
+Name           : Q2 Credit Card Activation Drive
+Objective      : Activation
+Type           : Promotional
+Offer          : 10% cashback + 500 reward points
+Product        : Credit Card
+Duration       : 7 days
+Execution Day  : Tuesday
+Channels Used  : Email, SMS, WhatsApp, Push
+
+[AUDIENCE SNAPSHOT]
+Segment Size       : 142,500
+Age Mix            : 18-24: 22%, 25-34: 41%, 35-44: 28%, 45+: 9%
+Avg CLV            : Rs. 84,000
+Avg Churn Prob     : 0.18
+Channel Affinity   : WhatsApp: 0.82, Email: 0.61, SMS: 0.44
+Engagement Score   : 6.4 / 10
+Propensity Score   : 0.71
+
+[RAW CAMPAIGN METRICS]
+Reach              : 43.1%  (Target: 50%)
+Email Open         : 24.3%
+Email Click        : 4.1%
+WhatsApp Open      : 68.2%
+WhatsApp Click     : 11.4%
+SMS Click          : 2.8%
+Conversion Rate    : 3.8%   (Target: 4.5%)
+Revenue            : Rs. 38,40,000
+Unsubscribes       : 0.6%
+Hard Bounces       : 12.4%
+Spam Complaints    : 0.08%
+
+[ML SCORES - BU MODEL v1.8.0]
+reach_score                : 0.52  [WARNING] Below threshold
+engagement_quality_score   : 0.74
+channel_efficiency_email   : 0.48  [WARNING] Underperforming
+channel_efficiency_whatsapp: 0.91  [OK] High performer
+audience_fit_score         : 0.79
+timing_quality_score       : 0.61  (Tuesday = suboptimal for this BU)
+journey_effectiveness      : 0.68
+frequency_risk_score       : 0.44  [WARNING] Frequency pressure detected
+churn_signal_score         : 0.21  [OK] Low churn risk
+cross_sell_opportunity     : 0.87  [OK] High
+conversion_probability     : 0.71
+
+[BENCHMARK DELTAS]
+vs BU Average          : Conversion -0.7pp, Reach -6.9pp
+vs Tenant Average      : Conversion +0.3pp
+vs Market Average      : Conversion +1.1pp
+vs Industry Average    : Conversion +0.8pp
+Percentile (BU)        : 34th
+Percentile (Industry)  : 61st
+
+[ANOMALY FLAGS]
+- Hard bounce rate 3.1x above BU historical average
+- WhatsApp CTR 2.4x above industry average
+- Unsubscribe spike in 18-24 age band (+180%)
+
+[HISTORICAL CONTEXT]
+Last 10 campaigns avg conversion : 4.5%
+Best channel historically         : WhatsApp
+Best day historically (this BU)   : Wednesday
+Same segment last campaign        : 3.2% conversion (current: +0.6pp)
+Same product category avg reach   : 49.2%
+
+
+================================================================================
+SECTION 6: LLM PROMPT DESIGN
+================================================================================
+
+SYSTEM PROMPT
+-------------
+You are a trained Campaign Performance Intelligence Engine for [TENANT_NAME]
+operating within the [INDUSTRY] industry, [MARKET] market, [BU] business unit.
+
+You have been provided a structured ML-scored campaign context. Your job is to
+analyze this context and generate precise, quantitative, actionable insights.
+
+Hierarchy-aware rules:
+- When scores fall below BU benchmarks, flag as BU-level underperformance
+- When scores are above industry average but below BU average, note the gap
+- Always reference the most specific benchmark level available
+- Cross-sell and opportunity insights must reference BU product catalog
+
+Output: Return ONLY a valid JSON array. No preamble. No markdown.
+Each object must follow this exact schema:
+
+{
+  "insight_type"    : one of [Performance, Root Cause, Audience, Channel,
+                              Journey, Timing, Opportunity, Anomaly,
+                              Forecast, Prescriptive],
+  "category"        : one of [Opportunity, Risk, Recommendation,
+                              Benchmark, Prediction],
+  "scope"           : one of [BU, Tenant, Market, Industry],
+  "observation"     : "Factual statement of what happened with numbers",
+  "root_cause"      : "ML-backed explanation of why it happened",
+  "recommendation"  : "Specific, executable next action",
+  "business_impact" : "Quantified expected uplift or risk value",
+  "confidence"      : integer 50-99
+}
+
+Generate 8-12 insights. Cover all 10 insight types. Do not repeat types
+more than twice. Be specific, quantitative, and hierarchy-aware.
+
+
+USER PROMPT (assembled by Context Builder)
+------------------------------------------
+Analyze the following ML-scored campaign context and generate insights:
+
+[PASTE FULL CONTEXT BLOCK HERE]
+
+Prioritize:
+1. Anomalies flagged by the ML model
+2. Largest benchmark deltas
+3. Highest cross-sell opportunity scores
+4. Channels with efficiency score gaps > 0.3
+
+
+================================================================================
+SECTION 7: OUTPUT SCHEMA - 10 INSIGHT CATEGORIES
+================================================================================
+
+#  | Insight Type | Scope Relevance  | Example Output
+---|--------------|------------------|-----------------------------------------------
+1  | Performance  | BU vs Target     | Reach 43.1% vs 50% BU target - 6.9pp gap
+2  | Root Cause   | BU / Tenant      | 68% hard bounces from inactive corp domains
+3  | Audience     | BU               | 25-34 age band drove 58% at 41% share
+4  | Channel      | BU / Market      | WhatsApp efficiency 0.91 vs Email 0.48
+5  | Journey      | Tenant           | Email+WhatsApp path converted 2.3x vs email-only
+6  | Timing       | BU Historical    | Tuesday 13% below Wednesday BU historical avg
+7  | Opportunity  | BU Product       | 24,500 Loan-declined -> Credit Card prop 0.87
+8  | Anomaly      | BU / Tenant      | Unsubscribe +180% in 18-24 band
+9  | Forecast     | Tenant Model     | Final conversion projected 4.1% based on Day 5
+10 | Prescriptive | BU               | Shift 20% email to WhatsApp -> +1.2pp conversion
+
+
+FULL INSIGHT OUTPUT OBJECT (Example)
+--------------------------------------
+{
+  "insight_type"    : "Channel",
+  "category"        : "Opportunity",
+  "scope"           : "BU",
+  "observation"     : "WhatsApp generated 41% of conversions while receiving
+                       only 18% of campaign volume. Channel efficiency: 0.91.",
+  "root_cause"      : "Audience channel affinity for WhatsApp is 0.82 vs Email
+                       0.61. BU model shows WhatsApp CTR is 2.4x industry
+                       average for this segment.",
+  "recommendation"  : "Reallocate 20% of Email volume to WhatsApp for this
+                       segment in the next campaign execution.",
+  "business_impact" : "Estimated +1.2pp conversion uplift = approx Rs. 4,60,000
+                       additional revenue based on current AOV.",
+  "confidence"      : 89
+}
+
+
+================================================================================
+SECTION 8: API AND SERVICE DESIGN
+================================================================================
+
+ENDPOINTS
+---------
+
+POST /api/v1/insights/generate
+  Body: {
+    campaign_id       : string,
+    tenant_id         : string,
+    bu_id             : string,
+    market_id         : string,
+    industry_id       : string,
+    campaign_metrics  : { ... },
+    campaign_metadata : { ... }
+  }
+  Response: {
+    context_block : string,
+    ml_scores     : { ... },
+    insights      : [ InsightObject x 8-12 ]
+  }
+
+GET /api/v1/insights/{campaign_id}
+  --> Returns cached insight set for CSR display
+
+GET /api/v1/benchmarks/{scope}/{scope_id}
+  --> Returns benchmark profile for a given scope level
+
+GET /api/v1/ml/models/{tenant_id}/{bu_id}
+  --> Returns active model version metadata
+
+
+PROCESSING FLOW
+---------------
+Step 1  : Receive campaign_id + hierarchy IDs
+Step 2  : Resolve hierarchy --> fetch benchmarks at all 4 levels
+Step 3  : Pull CDP audience features for campaign segment
+Step 4  : Fetch channel metrics from campaign execution logs
+Step 5  : Load historical campaigns (last 10, same scope filters)
+Step 6  : Run ML model at BU level --> get feature vector + scores
+            - If BU model confidence < threshold --> fallback to Tenant
+            - If Tenant model confidence < threshold --> fallback to Market
+            - Always merge Industry-level benchmarks
+Step 7  : Assemble context block (structured text)
+Step 8  : Send system prompt + context block to LLM
+Step 9  : Parse JSON response --> validate schema
+Step 10 : Store insights against campaign_id
+Step 11 : Return to CSR for display
+
+
+================================================================================
+SECTION 9: DATABASE SCHEMA
+================================================================================
+
+-- Hierarchy tables
+
+CREATE TABLE industries (
+  id                 VARCHAR PRIMARY KEY,
+  name               VARCHAR NOT NULL,
+  benchmark_profile  JSONB
+);
+
+CREATE TABLE markets (
+  id                   VARCHAR PRIMARY KEY,
+  name                 VARCHAR NOT NULL,
+  industry_id          VARCHAR REFERENCES industries(id),
+  regional_profile     JSONB
+);
+
+CREATE TABLE tenants (
+  id                VARCHAR PRIMARY KEY,
+  name              VARCHAR NOT NULL,
+  market_id         VARCHAR REFERENCES markets(id),
+  ml_model_version  VARCHAR
+);
+
+CREATE TABLE business_units (
+  id                VARCHAR PRIMARY KEY,
+  name              VARCHAR NOT NULL,
+  tenant_id         VARCHAR REFERENCES tenants(id),
+  product_category  VARCHAR,
+  ml_model_version  VARCHAR
+);
+
+-- ML model registry
+
+CREATE TABLE ml_models (
+  id                      UUID PRIMARY KEY,
+  scope_level             VARCHAR,
+  scope_id                VARCHAR,
+  model_version           VARCHAR,
+  model_path              VARCHAR,
+  feature_count           INTEGER,
+  trained_on_date         DATE,
+  min_campaign_threshold  INTEGER,
+  fallback_scope_id       VARCHAR
+);
+
+-- Campaign insights store
+
+CREATE TABLE campaign_insights (
+  id               UUID PRIMARY KEY,
+  campaign_id      VARCHAR NOT NULL,
+  tenant_id        VARCHAR,
+  bu_id            VARCHAR,
+  context_block    TEXT,
+  ml_scores        JSONB,
+  insights         JSONB,
+  model_version    VARCHAR,
+  llm_model        VARCHAR,
+  generated_at     TIMESTAMP DEFAULT NOW(),
+  confidence_avg   FLOAT
+);
+
+-- Benchmark profiles
+
+CREATE TABLE benchmarks (
+  id           UUID PRIMARY KEY,
+  scope_level  VARCHAR,
+  scope_id     VARCHAR,
+  metric_name  VARCHAR,
+  avg_value    FLOAT,
+  p25          FLOAT,
+  p50          FLOAT,
+  p75          FLOAT,
+  p90          FLOAT,
+  period       VARCHAR,
+  updated_at   TIMESTAMP
+);
+
+-- Insight deduplication log
+
+CREATE TABLE insight_history (
+  id                UUID PRIMARY KEY,
+  bu_id             VARCHAR,
+  campaign_id       VARCHAR,
+  insight_type      VARCHAR,
+  observation_hash  VARCHAR,
+  generated_at      TIMESTAMP
+);
+
+
+================================================================================
+SECTION 10: DATA SOURCES REQUIRED
+================================================================================
+
+A. Audience Intelligence (from CDP)
+   - Segment size
+   - Demographics (age, gender, affluence)
+   - Geography
+   - Device preference
+   - Product ownership
+   - Engagement score
+   - RFM score (Recency, Frequency, Monetary)
+   - Propensity score
+   - Customer Lifetime Value (CLV)
+   - Churn probability
+   - Channel affinity
+   - Preferred contact time
+   - Previous campaign interactions
+
+B. Campaign Metadata
+   - Campaign objective
+   - Campaign type
+   - Offer category
+   - Industry vertical
+   - Product category
+   - Promotion type
+   - Communication frequency
+   - Journey complexity
+   - Execution time and day
+   - Duration
+
+C. Channel Performance Data (per channel)
+   Channels: Email, SMS, WhatsApp, Push, Web Push, RCS, Social, Ads
+   Metrics: Delivered, Opened, Clicked, Converted, Unsubscribed,
+            Bounced, Spam complaints, Revenue contribution, Attribution
+
+D. Historical Campaign Data
+   - Last 10 campaigns
+   - Filtered by: same campaign type, same segment, same product category,
+     same season, same geography, same channel mix
+
+E. Benchmark Intelligence
+   - Previous campaign average (BU level)
+   - Business unit average
+   - Product category average
+   - Industry benchmark
+   - Competitor benchmark (if available)
+
+
+================================================================================
+SECTION 11: TECH STACK
+================================================================================
+
+Layer              | Technology
+-------------------|------------------------------------------------------------
+ML Models          | Python, scikit-learn, XGBoost, LightGBM
+Model Serving      | FastAPI, MLflow (model registry + versioning)
+Feature Store      | Feast or Redis (real-time feature lookup)
+Context Builder    | Python service (assembles structured text block)
+LLM                | Anthropic Claude API (claude-sonnet-4-6)
+Backend API        | Node.js or FastAPI
+Database           | PostgreSQL + JSONB
+Cache              | Redis (insight cache per campaign_id)
+CSR Frontend       | React + TypeScript
+Async Queue        | Celery or BullMQ
+Monitoring         | MLflow + Prometheus + Grafana
+
+
+================================================================================
+SECTION 12: KEY DESIGN PRINCIPLES
+================================================================================
+
+1. HIERARCHY-FIRST SCORING
+   Every score and insight is tagged to its scope level so users always know
+   whether a benchmark is BU-specific or industry-wide.
+
+2. ML SCORES DRIVE LLM PROMPTS
+   The LLM never sees raw metrics alone. It receives ML-scored signals so
+   insights are model-backed, not pattern-matched from text.
+
+3. GRACEFUL FALLBACK
+   If BU data is insufficient, the system falls back:
+   BU --> Tenant --> Market --> Industry
+   Fallback scope is always flagged in the insight output.
+
+4. INSIGHT DEDUPLICATION
+   System checks the last 3 CSRs for the same BU and suppresses verbatim
+   repeated insight types, forcing new observations each run.
+
+5. CONFIDENCE GATING
+   Insights with model confidence below 55% are suppressed or flagged
+   as low-confidence to avoid misleading users.
+
+6. CONTEXT RICHNESS OVER RAW DATA
+   Raw numbers are never sent to the LLM alone. The context block includes
+   ML scores, benchmark deltas, anomaly flags, and historical context to
+   ground the LLM for specific, non-generic insights.
+
+7. SCOPE-AWARE RECOMMENDATIONS
+   Cross-sell and opportunity insights always reference the specific BU
+   product catalog so recommendations are relevant to what the tenant sells.
+
+
+================================================================================
+SECTION 13: INSIGHT QUALITY GUARDRAILS (LLM RULES)
+================================================================================
+
+The LLM system prompt must enforce:
+
+- Every observation must contain at least one number or percentage
+- Root cause must reference an ML score or a benchmark delta
+- Recommendation must be a specific executable action (not generic advice)
+- Business impact must be quantified (revenue, percentage uplift, or count)
+- Confidence score must reflect ML model certainty, not LLM confidence
+- No two insights of the same type should have similar observations
+- All scope references (BU/Tenant/Market/Industry) must be accurate
+- Anomaly insights only generated if anomaly_flags list is non-empty
+- Forecast insights must reference trend slope or day-of-campaign data
+- Prescriptive insights must cite which ML score triggered the recommendation
+
+
+================================================================================
+SECTION 14: END-TO-END FLOW EXAMPLE
+================================================================================
+
+INPUT:
+  Campaign   : Q2 Credit Card Activation Drive
+  Tenant     : HDFC Bank
+  BU         : Credit Cards
+  Market     : India - South
+  Industry   : Banking & Financial Services
+
+STEP 1 - Hierarchy resolved:
+  BU model v1.8.0 loaded
+  Tenant model v3.2.1 loaded as fallback
+  Market + Industry benchmarks fetched
+
+STEP 2 - ML scoring complete:
+  reach_score: 0.52, channel_efficiency_whatsapp: 0.91,
+  frequency_risk_score: 0.44, cross_sell_opportunity: 0.87
+  Anomaly flags: [hard_bounce_spike, unsubscribe_spike_18_24]
+
+STEP 3 - Context block assembled:
+  ~2,400 tokens of structured ML-scored context
+
+STEP 4 - LLM called:
+  Model: claude-sonnet-4-6
+  Output: 10 structured insight objects (JSON array)
+
+STEP 5 - Insights stored:
+  Table: campaign_insights
+  Key: campaign_id = CMP_Q2_CC_2024
+
+STEP 6 - CSR displays:
+  10 insight cards with type badge, scope tag, observation,
+  root cause, recommendation, business impact, confidence score
+
+
+SAMPLE OUTPUT INSIGHT:
+{
+  "insight_type"    : "Opportunity",
+  "category"        : "Opportunity",
+  "scope"           : "BU",
+  "observation"     : "11,842 customers declined for Personal Loans show
+                       cross-sell propensity score of 0.87 for Credit Cards.",
+  "root_cause"      : "BU model identifies product ownership gap. These
+                       customers have high RFM scores but no credit card.
+                       Loan ineligibility does not correlate with credit
+                       card ineligibility in this segment.",
+  "recommendation"  : "Launch targeted Credit Card onboarding journey for
+                       these 11,842 customers within the next 14 days.",
+  "business_impact" : "At 8.2% expected conversion: 971 new activations,
+                       estimated first-year revenue of Rs. 82,00,000.",
+  "confidence"      : 87
+}
+
+
+================================================================================
+  END OF DOCUMENT
+  Campaign Performance Intelligence Engine - Build Prompt v1.0
+  Resulticks Solution Inc.
+================================================================================
