@@ -10,13 +10,14 @@ from ml.models.base_model import BaseMLModel
 def _load_bundles(scope_id: str) -> Dict[str, dict]:
     import os, joblib
     trained_dir = os.path.join(os.path.dirname(__file__), "..", "trained_models")
+    industry_dir = os.path.join(trained_dir, "Industry", scope_id)
     bundles = {}
-    if os.path.isdir(trained_dir):
-        for fname in os.listdir(trained_dir):
-            if fname.startswith(f"Industry_{scope_id}_") and fname.endswith(".joblib"):
-                target = fname.replace(f"Industry_{scope_id}_", "").replace(".joblib", "")
+    if os.path.isdir(industry_dir):
+        for fname in os.listdir(industry_dir):
+            if fname.endswith(".joblib"):
+                target = fname.replace(".joblib", "")
                 try:
-                    bundles[target] = joblib.load(os.path.join(trained_dir, fname))
+                    bundles[target] = joblib.load(os.path.join(industry_dir, fname))
                 except Exception:
                     pass
     return bundles

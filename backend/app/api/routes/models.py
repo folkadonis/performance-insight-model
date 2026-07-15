@@ -40,8 +40,8 @@ def _list_bundles() -> List[dict]:
     if not os.path.isdir(MODELS_DIR):
         return []
     result = []
-    for path in sorted(glob.glob(os.path.join(MODELS_DIR, "*.joblib"))):
-        fname = os.path.basename(path)
+    for path in sorted(glob.glob(os.path.join(MODELS_DIR, "**", "*.joblib"), recursive=True)):
+        fname = os.path.relpath(path, MODELS_DIR)
         try:
             b = joblib.load(path)
             result.append({
@@ -62,15 +62,20 @@ def _list_bundles() -> List[dict]:
 
 
 def _load_scope_bundles(scope_level: str, scope_id: str) -> Dict[str, dict]:
-    prefix = f"{scope_level}_{scope_id}_"
+    if scope_level == "BU":
+        tenant_uuid, bu_id = scope_id.rsplit("_", 1)
+        search_dir = os.path.join(MODELS_DIR, tenant_uuid, "BU", bu_id)
+    elif scope_level == "Tenant":
+        search_dir = os.path.join(MODELS_DIR, scope_id, "Tenant")
+    else:
+        search_dir = os.path.join(MODELS_DIR, scope_level, scope_id)
     bundles = {}
-    for path in glob.glob(os.path.join(MODELS_DIR, f"{prefix}*.joblib")):
-        fname = os.path.basename(path)
-        target = fname.replace(prefix, "").replace(".joblib", "")
+    for path in glob.glob(os.path.join(search_dir, "*.joblib")):
+        target = os.path.basename(path).replace(".joblib", "")
         try:
             bundles[target] = joblib.load(path)
         except Exception as exc:
-            log.warning("Failed to load %s: %s", fname, exc)
+            log.warning("Failed to load %s: %s", path, exc)
     return bundles
 
 

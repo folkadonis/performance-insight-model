@@ -35,8 +35,16 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 
 
 def _model_path(scope_level: str, scope_id: str, target: str) -> str:
-    fname = f"{scope_level}_{scope_id}_{target}.joblib"
-    return os.path.join(MODELS_DIR, fname)
+    if scope_level == "BU":
+        # scope_id = "<tenant_uuid>_<bu_id>"
+        tenant_uuid, bu_id = scope_id.rsplit("_", 1)
+        subdir = os.path.join(MODELS_DIR, tenant_uuid, "BU", bu_id)
+    elif scope_level == "Tenant":
+        subdir = os.path.join(MODELS_DIR, scope_id, "Tenant")
+    else:  # Market, Industry
+        subdir = os.path.join(MODELS_DIR, scope_level, scope_id)
+    os.makedirs(subdir, exist_ok=True)
+    return os.path.join(subdir, f"{target}.joblib")
 
 
 def _build_estimator(scope_level: str, n_samples: int):

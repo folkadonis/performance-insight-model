@@ -20,12 +20,15 @@ def _load_bundles(scope_id: str) -> Dict[str, dict]:
     import os, joblib
     trained_dir = os.path.join(os.path.dirname(__file__), "..", "trained_models")
     bundles = {}
-    if os.path.isdir(trained_dir):
-        for fname in os.listdir(trained_dir):
-            if fname.startswith(f"BU_{scope_id}_") and fname.endswith(".joblib"):
-                target = fname.replace(f"BU_{scope_id}_", "").replace(".joblib", "")
+    # scope_id = "<tenant_uuid>_<bu_id>"
+    tenant_uuid, bu_id = scope_id.rsplit("_", 1)
+    bu_dir = os.path.join(trained_dir, tenant_uuid, "BU", bu_id)
+    if os.path.isdir(bu_dir):
+        for fname in os.listdir(bu_dir):
+            if fname.endswith(".joblib"):
+                target = fname.replace(".joblib", "")
                 try:
-                    bundles[target] = joblib.load(os.path.join(trained_dir, fname))
+                    bundles[target] = joblib.load(os.path.join(bu_dir, fname))
                 except Exception:
                     pass
     _BUNDLE_CACHE[scope_id] = bundles
