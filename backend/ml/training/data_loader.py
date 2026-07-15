@@ -1,19 +1,16 @@
 """
-Training Data Loader — fetches historical campaign data from Resulticks MySQL
-(ProxySQL 10.200.2.195:6033) for ML model training.
+Training Data Loader — fetches historical campaign data from Resulticks MySQL.
 
-Accessible tables in resulticksjobdb:
-  campaignmetadata    — per-campaign per-channel metrics (email + SMS only)
-  CampaignJobMetaData — links CampaignID → cust_{tenantUUID}
-  CampaignJobData     — audience/segment counts per job
-  TenantLookup        — tenantUUID → ShortCode + ClientID
-  BusinessUnitLookup  — BU integers per tenant
-  ccampaign           — campaign type/dates (partial coverage)
-  resulticksmaster.mclient — ClientID → IndustryID
+Two data paths:
+  1. ProxySQL (10.200.2.195:6033) — aggregated campaignmetadata in resulticksjobdb.
+     Used for industry/market models and as a fallback for tenant/BU models.
 
-Note: per-tenant fact tables (rptcampaignemailsummaryfact, etc.) live on separate
-tenant servers that are not routable via ProxySQL. Training uses the ETL-aggregated
-campaignmetadata table instead.
+  2. Per-tenant direct (10.200.2.63:6603, user=TENANT_DIRECT_USER) — the
+     camp_<UUID> database on the tenant server, which has:
+       ccampaignmetadatamaster  — campaign metadata (250k+ rows per tenant)
+       rptcampaignemailsummaryfact — actual blast/open/click metrics
+     This path is tried first for tenant and BU models; 10-100x more data than
+     the ProxySQL path because ProxySQL only sees ETL-aggregated rows.
 """
 
 import logging
@@ -164,6 +161,95 @@ def _load_sync(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Per-tenant direct training SQL
+# Connects to camp_<UUID> on TENANT_DIRECT_HOST:TENANT_DIRECT_PORT.
+# ccampaignmetadatamaster has 250k+ rows; rptcampaignemailsummaryfact has the
+# actual blast/open/click counters (obfuscated column names).
+#
+# Column mapping (rptcampaignemailsummaryfact):
+#   Z0  = email_opens (total)
+#   5K  = email_unique_opens
+#   5E  = email_clicks (total)
+#   U0  = email_unique_clicks
+#   KW  = always 0 for this tenant; use NumberOfRecipients for blast count
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DIRECT_TRAINING_SQL = """
+SELECT
+    cm.CampaignID                                           AS campaign_id,
+    COALESCE(cm.DepartmentID, 0)                           AS bu_id,
+    cm.CampaignType                                        AS campaign_type_code,
+    0                                                      AS industry_id,
+    0                                                      AS market_id,
+    COALESCE(DATEDIFF(cm.EndDate, cm.StartDate), 7)       AS campaign_duration_days,
+    COALESCE(cm.NumberOfRecipients, 0)                    AS segment_size,
+    COALESCE(cm.NumberOfRecipients, 0)                    AS email_blast,
+    COALESCE(f.Z0,  0)                                    AS email_opens,
+    COALESCE(f.`5K`, 0)                                   AS email_unique_opens,
+    COALESCE(f.`5E`, 0)                                   AS email_clicks,
+    COALESCE(f.`U0`, 0)                                   AS email_unique_clicks,
+    0                                                      AS sms_sent,
+    0                                                      AS sms_clicks,
+    0                                                      AS sms_unique_clicks
+FROM ccampaignmetadatamaster cm
+JOIN rptcampaignemailsummaryfact f ON cm.CampaignGUID = f.CampaignGUID
+WHERE cm.ChannelID = 1
+  AND cm.NumberOfRecipients > 0
+  {where_clause}
+ORDER BY cm.CampaignID DESC
+LIMIT {limit}
+"""
+
+_DIRECT_BUS_SQL = """
+SELECT DISTINCT COALESCE(DepartmentID, 0) AS bu_id
+FROM ccampaignmetadatamaster
+WHERE DepartmentID IS NOT NULL AND DepartmentID > 0
+"""
+
+
+def _load_direct(
+    sql: str, params: tuple,
+    host: str, port: int, user: str, password: str, db: str,
+) -> pd.DataFrame:
+    """Connect directly to a per-tenant server (no ProxySQL) and run sql."""
+    import pymysql
+    conn = pymysql.connect(
+        host=host, port=port, user=user, password=password,
+        database=db, charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+        connect_timeout=15, read_timeout=120, write_timeout=60,
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        return pd.DataFrame(rows) if rows else pd.DataFrame()
+    finally:
+        conn.close()
+
+
+def load_tenant_server_ip(
+    tenant_id: str,
+    host: str, port: int, user: str, password: str, db: str,
+) -> str | None:
+    """
+    Look up the ServerName (IP) of the camp_<tenant_id> database from
+    resulticksmaster.mdbserverinformation via ProxySQL.
+    Returns None if not found.
+    """
+    sql = """
+        SELECT ServerName
+        FROM resulticksmaster.mdbserverinformation
+        WHERE Instancename = CONCAT('camp_', %s)
+        LIMIT 1
+    """
+    df = _load_sync(sql, (tenant_id,), host, port, user, password, db)
+    if df.empty or "ServerName" not in df.columns:
+        return None
+    return str(df.iloc[0]["ServerName"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -216,6 +302,53 @@ def load_tenant_training_data(
     sql = _TRAINING_SQL.format(where_clause=where, limit=limit)
     df = _load_sync(sql, (tenant_id,), host, port, user, password, db)
     log.info("Tenant training data: %d rows (TenantID=%s)", len(df), tenant_id[:8])
+    return df
+
+
+# ── Per-tenant direct loaders ─────────────────────────────────────────────────
+
+def load_tenant_bus_direct(
+    tenant_id: str,
+    direct_host: str, direct_port: int, direct_user: str, direct_password: str,
+) -> List[int]:
+    """BU IDs from ccampaignmetadatamaster on the per-tenant server."""
+    db = f"camp_{tenant_id}"
+    try:
+        df = _load_direct(_DIRECT_BUS_SQL, (), direct_host, direct_port, direct_user, direct_password, db)
+    except Exception as exc:
+        log.warning("Direct BU discovery failed TenantID=%s: %s", tenant_id[:8], exc)
+        return [0]
+    if df.empty:
+        return [0]
+    bus = [int(x) for x in df["bu_id"].dropna().unique().tolist()]
+    log.info("  Direct BU discovery TenantID=%s -> %d BUs: %s", tenant_id[:8], len(bus), bus)
+    return bus
+
+
+def load_bu_training_data_direct(
+    tenant_id: str, bu_id: int,
+    direct_host: str, direct_port: int, direct_user: str, direct_password: str,
+    limit: int = 5000,
+) -> pd.DataFrame:
+    """Training data from ccampaignmetadatamaster+rptcampaignemailsummaryfact for one BU."""
+    where = "AND COALESCE(cm.DepartmentID, 0) = %s"
+    sql = _DIRECT_TRAINING_SQL.format(where_clause=where, limit=limit)
+    db = f"camp_{tenant_id}"
+    df = _load_direct(sql, (bu_id,), direct_host, direct_port, direct_user, direct_password, db)
+    log.info("Direct BU training: %d rows (TenantID=%s BU=%d)", len(df), tenant_id[:8], bu_id)
+    return df
+
+
+def load_tenant_training_data_direct(
+    tenant_id: str,
+    direct_host: str, direct_port: int, direct_user: str, direct_password: str,
+    limit: int = 10000,
+) -> pd.DataFrame:
+    """Training data from ccampaignmetadatamaster+rptcampaignemailsummaryfact for a tenant."""
+    sql = _DIRECT_TRAINING_SQL.format(where_clause="", limit=limit)
+    db = f"camp_{tenant_id}"
+    df = _load_direct(sql, (), direct_host, direct_port, direct_user, direct_password, db)
+    log.info("Direct Tenant training: %d rows (TenantID=%s)", len(df), tenant_id[:8])
     return df
 
 

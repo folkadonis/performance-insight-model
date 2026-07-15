@@ -33,8 +33,12 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 from ml.training.data_loader import (
     load_active_tenants,
     load_tenant_bus,
+    load_tenant_server_ip,
     load_bu_training_data,
     load_tenant_training_data,
+    load_bu_training_data_direct,
+    load_tenant_training_data_direct,
+    load_tenant_bus_direct,
     load_industry_training_data,
     load_market_training_data,
     load_all_active_tenants_training_data,
@@ -57,6 +61,16 @@ def _db() -> dict:
         "user":     os.getenv("RESULTICKS_DB_USER", "res_pyuser"),
         "password": os.getenv("RESULTICKS_DB_PASSWORD", "SauQE45aqnEGnr2rwsLB4BzuX39SRT47"),
         "db":       os.getenv("RESULTICKS_DB_NAME", "resulticksjobdb"),
+    }
+
+
+def _direct() -> dict:
+    """Credentials for per-tenant camp_<UUID> direct connections."""
+    return {
+        "direct_host":     os.getenv("TENANT_DIRECT_HOST", "10.200.2.63"),
+        "direct_port":     int(os.getenv("TENANT_DIRECT_PORT", "6603")),
+        "direct_user":     os.getenv("TENANT_DIRECT_USER", "res_apdev3138"),
+        "direct_password": os.getenv("TENANT_DIRECT_PASSWORD", "CR7LM10MS07vk18dDj47RS45p8XfUeSR3#"),
     }
 
 
@@ -153,37 +167,65 @@ def train_all_active():
 
     skipped = []
 
+    direct = _direct()
+
     for _, tenant_row in tenants.iterrows():
         tid = str(tenant_row["TenantID"])
         short = tenant_row["TenantShortCode"]
 
-        # ── Tenant-level model ────────────────────────────────────────────
+        # ── Tenant-level model (direct first, ProxySQL fallback) ──────────
         log.info("Training Tenant model  T1=%s (%s)", tid[:8], short)
         try:
-            df_t = load_tenant_training_data(tid, **db)
+            df_t = load_tenant_training_data_direct(tid, **direct)
+            source = "direct"
+            if df_t.empty:
+                log.info("  Direct returned 0 rows — falling back to ProxySQL")
+                df_t = load_tenant_training_data(tid, **db)
+                source = "proxysql"
             if not df_t.empty:
+                log.info("  %d rows via %s", len(df_t), source)
                 X, y_dict = _build_arrays(df_t)
                 if X is not None:
                     saved = train_scope(X, y_dict, "Tenant", tid)
                     summary.append((tid[:8], "Tenant", tid[:8], len(saved)))
         except Exception as exc:
-            log.warning("  Skipping Tenant %s (%s): %s", tid[:8], short, exc)
-            skipped.append((tid[:8], short, str(exc)[:80]))
-            continue
+            log.warning("  Direct failed (%s) — trying ProxySQL fallback", exc)
+            try:
+                df_t = load_tenant_training_data(tid, **db)
+                if not df_t.empty:
+                    X, y_dict = _build_arrays(df_t)
+                    if X is not None:
+                        saved = train_scope(X, y_dict, "Tenant", tid)
+                        summary.append((tid[:8], "Tenant", tid[:8], len(saved)))
+            except Exception as exc2:
+                log.warning("  Skipping Tenant %s (%s): %s", tid[:8], short, exc2)
+                skipped.append((tid[:8], short, str(exc2)[:80]))
+                continue
 
-        # ── BU-level models ───────────────────────────────────────────────
+        # ── BU-level models (direct first, ProxySQL fallback) ─────────────
         try:
-            bus = load_tenant_bus(tid, **db)
+            bus = load_tenant_bus_direct(tid, **direct)
+            if bus == [0]:
+                bus = load_tenant_bus(tid, **db)
         except Exception as exc:
-            log.warning("  Skipping BU discovery for %s: %s", tid[:8], exc)
-            skipped.append((tid[:8], short, f"BU discovery: {exc}"[:80]))
-            continue
+            log.warning("  BU discovery failed (%s) — using ProxySQL", exc)
+            try:
+                bus = load_tenant_bus(tid, **db)
+            except Exception as exc2:
+                log.warning("  Skipping BU discovery for %s: %s", tid[:8], exc2)
+                skipped.append((tid[:8], short, f"BU discovery: {exc2}"[:80]))
+                continue
 
         for bu_id in bus:
             log.info("  Training BU model  T1=%s B1=%d", tid[:8], bu_id)
             try:
-                df_b = load_bu_training_data(tid, bu_id, **db)
+                df_b = load_bu_training_data_direct(tid, bu_id, **direct)
+                source = "direct"
+                if df_b.empty:
+                    df_b = load_bu_training_data(tid, bu_id, **db)
+                    source = "proxysql"
                 if not df_b.empty:
+                    log.info("  %d rows via %s", len(df_b), source)
                     X, y_dict = _build_arrays(df_b)
                     if X is not None:
                         saved = train_scope(X, y_dict, "BU", f"{tid}_{bu_id}")
