@@ -161,17 +161,21 @@ def _load_sync(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Per-tenant direct training SQL
+# Per-tenant direct training SQL (Email + SMS)
 # Connects to camp_<UUID> on TENANT_DIRECT_HOST:TENANT_DIRECT_PORT.
-# ccampaignmetadatamaster has 250k+ rows; rptcampaignemailsummaryfact has the
-# actual blast/open/click counters (obfuscated column names).
 #
-# Column mapping (rptcampaignemailsummaryfact):
+# Column mapping — rptcampaignemailsummaryfact (Email, ChannelID=1):
 #   Z0  = email_opens (total)
 #   5K  = email_unique_opens
 #   5E  = email_clicks (total)
 #   U0  = email_unique_clicks
-#   KW  = always 0 for this tenant; use NumberOfRecipients for blast count
+#   NumberOfRecipients in ccampaignmetadatamaster = blast count
+#
+# Column mapping — rptcampaignsmssummaryfact (SMS/Mobile, ChannelID=2):
+#   Y0  = sms_sent (total blast)
+#   U7  = sms_delivered
+#   5C  = sms_clicks (total)
+#   UV  = sms_unique_clicks
 # ─────────────────────────────────────────────────────────────────────────────
 
 _DIRECT_TRAINING_SQL = """
@@ -179,22 +183,33 @@ SELECT
     cm.CampaignID                                           AS campaign_id,
     COALESCE(cm.DepartmentID, 0)                           AS bu_id,
     cm.CampaignType                                        AS campaign_type_code,
+    cm.ChannelID                                           AS channel_id,
     0                                                      AS industry_id,
     0                                                      AS market_id,
     COALESCE(DATEDIFF(cm.EndDate, cm.StartDate), 7)       AS campaign_duration_days,
     COALESCE(cm.NumberOfRecipients, 0)                    AS segment_size,
-    COALESCE(cm.NumberOfRecipients, 0)                    AS email_blast,
-    COALESCE(f.Z0,  0)                                    AS email_opens,
-    COALESCE(f.`5K`, 0)                                   AS email_unique_opens,
-    COALESCE(f.`5E`, 0)                                   AS email_clicks,
-    COALESCE(f.`U0`, 0)                                   AS email_unique_clicks,
-    0                                                      AS sms_sent,
-    0                                                      AS sms_clicks,
-    0                                                      AS sms_unique_clicks
+    -- Email (ChannelID=1)
+    CASE WHEN cm.ChannelID = 1 THEN COALESCE(cm.NumberOfRecipients, 0) ELSE 0 END AS email_blast,
+    CASE WHEN cm.ChannelID = 1 THEN COALESCE(ef.Z0,   0) ELSE 0 END              AS email_opens,
+    CASE WHEN cm.ChannelID = 1 THEN COALESCE(ef.`5K`, 0) ELSE 0 END              AS email_unique_opens,
+    CASE WHEN cm.ChannelID = 1 THEN COALESCE(ef.`5E`, 0) ELSE 0 END              AS email_clicks,
+    CASE WHEN cm.ChannelID = 1 THEN COALESCE(ef.`U0`, 0) ELSE 0 END              AS email_unique_clicks,
+    -- SMS (ChannelID=2)
+    CASE WHEN cm.ChannelID = 2 THEN COALESCE(sf.Y0,   0) ELSE 0 END              AS sms_sent,
+    CASE WHEN cm.ChannelID = 2 THEN COALESCE(sf.U7,   0) ELSE 0 END              AS sms_delivered,
+    CASE WHEN cm.ChannelID = 2 THEN COALESCE(sf.`5C`, 0) ELSE 0 END              AS sms_clicks,
+    CASE WHEN cm.ChannelID = 2 THEN COALESCE(sf.UV,   0) ELSE 0 END              AS sms_unique_clicks,
+    0                                                                              AS wa_sent,
+    0                                                                              AS wa_delivered,
+    0                                                                              AS wa_clicks
 FROM ccampaignmetadatamaster cm
-JOIN rptcampaignemailsummaryfact f ON cm.CampaignGUID = f.CampaignGUID
-WHERE cm.ChannelID = 1
+LEFT JOIN rptcampaignemailsummaryfact ef
+    ON cm.CampaignGUID = ef.CampaignGUID AND cm.ChannelID = 1
+LEFT JOIN rptcampaignsmssummaryfact sf
+    ON cm.CampaignGUID = sf.CampaignGUID AND cm.ChannelID = 2
+WHERE cm.ChannelID IN (1, 2)
   AND cm.NumberOfRecipients > 0
+  AND (ef.CampaignGUID IS NOT NULL OR sf.CampaignGUID IS NOT NULL)
   {where_clause}
 ORDER BY cm.CampaignID DESC
 LIMIT {limit}
@@ -330,7 +345,7 @@ def load_bu_training_data_direct(
     direct_host: str, direct_port: int, direct_user: str, direct_password: str,
     limit: int = 5000,
 ) -> pd.DataFrame:
-    """Training data from ccampaignmetadatamaster+rptcampaignemailsummaryfact for one BU."""
+    """Training data (Email + SMS) from camp_<UUID> for one BU."""
     where = "AND COALESCE(cm.DepartmentID, 0) = %s"
     sql = _DIRECT_TRAINING_SQL.format(where_clause=where, limit=limit)
     db = f"camp_{tenant_id}"
@@ -344,7 +359,7 @@ def load_tenant_training_data_direct(
     direct_host: str, direct_port: int, direct_user: str, direct_password: str,
     limit: int = 10000,
 ) -> pd.DataFrame:
-    """Training data from ccampaignmetadatamaster+rptcampaignemailsummaryfact for a tenant."""
+    """Training data (Email + SMS) from camp_<UUID> for a tenant."""
     sql = _DIRECT_TRAINING_SQL.format(where_clause="", limit=limit)
     db = f"camp_{tenant_id}"
     df = _load_direct(sql, (), direct_host, direct_port, direct_user, direct_password, db)
