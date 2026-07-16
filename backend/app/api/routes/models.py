@@ -62,6 +62,7 @@ def _list_bundles() -> List[dict]:
 
 
 def _load_scope_bundles(scope_level: str, scope_id: str) -> Dict[str, dict]:
+    scope_id = scope_id.replace("-", "_")
     if scope_level == "BU":
         tenant_uuid, bu_id = scope_id.rsplit("_", 1)
         search_dir = os.path.join(MODELS_DIR, tenant_uuid, "BU", bu_id)

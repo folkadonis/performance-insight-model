@@ -36,7 +36,7 @@ def _rate(num: float, den: float, default=0.0) -> float:
 
 
 def row_to_features(row: pd.Series) -> np.ndarray:
-    """Convert one training row to a 42-element feature vector."""
+    """Convert one training row to a 49-element feature vector."""
     seg = max(_s(row.get("segment_size"), 1), 1)
 
     # ── Channel counts ────────────────────────────────────────────────────────
@@ -66,7 +66,17 @@ def row_to_features(row: pd.Series) -> np.ndarray:
     wp_del    = _s(row.get("wp_delivered"))
     wp_clk    = _s(row.get("wp_clicks"))
 
-    total_sent = em_blast + sms_sent + wa_sent + mp_sent + wp_sent
+    rcs_sent  = _s(row.get("rcs_sent"))
+    rcs_del   = _s(row.get("rcs_delivered"))
+    rcs_clk   = _s(row.get("rcs_clicks"))
+
+    qr_scans  = _s(row.get("qr_scans"))
+    qr_clk    = _s(row.get("qr_clicks"))
+
+    sm_blast  = _s(row.get("sm_blast"))
+    sm_clk    = _s(row.get("sm_clicks"))
+
+    total_sent = em_blast + sms_sent + wa_sent + mp_sent + wp_sent + rcs_sent + sm_blast
     total_conv = em_conv + sms_conv + wa_conv + _s(row.get("mp_conversions")) + _s(row.get("wp_conversions"))
 
     # ── Rates ─────────────────────────────────────────────────────────────────
@@ -90,9 +100,15 @@ def row_to_features(row: pd.Series) -> np.ndarray:
     wp_del_rate = _rate(wp_del, wp_sent)
     wp_clk_rate = _rate(wp_clk, wp_del)
 
+    rcs_del_rate = _rate(rcs_del, rcs_sent)
+    rcs_clk_rate = _rate(rcs_clk, max(rcs_del, rcs_sent, 1) if rcs_sent > 0 else 1)
+
+    qr_clk_rate  = _rate(qr_clk, qr_scans)
+    sm_clk_rate  = _rate(sm_clk, sm_blast)
+
     # ── Audience / reach ──────────────────────────────────────────────────────
     seg_log    = np.log1p(seg)
-    max_blast  = max(em_blast, sms_sent, wa_sent, mp_sent, wp_sent)
+    max_blast  = max(em_blast, sms_sent, wa_sent, mp_sent, wp_sent, rcs_sent, sm_blast)
     reach_pct  = _rate(max_blast, seg)
     aff_email  = _rate(em_blast, seg)
     aff_sms    = _rate(sms_sent,  seg)
@@ -109,7 +125,10 @@ def row_to_features(row: pd.Series) -> np.ndarray:
     has_sms   = 1.0 if sms_sent  > 0 else 0.0
     has_wa    = 1.0 if wa_sent   > 0 else 0.0
     has_push  = 1.0 if mp_sent   > 0 else 0.0
-    ch_count  = has_email + has_sms + has_wa + has_push
+    has_rcs   = 1.0 if rcs_sent  > 0 else 0.0
+    has_qr    = 1.0 if qr_scans  > 0 else 0.0
+    has_sm    = 1.0 if sm_blast  > 0 else 0.0
+    ch_count  = has_email + has_sms + has_wa + has_push + has_rcs + has_qr + has_sm
     multi_ch  = 1.0 if ch_count > 1 else 0.0
 
     # ── Timing placeholders ───────────────────────────────────────────────────
@@ -121,16 +140,18 @@ def row_to_features(row: pd.Series) -> np.ndarray:
 
     # ── Composites ────────────────────────────────────────────────────────────
     engagement_composite = (
-        email_open_rate * 0.40
+        email_open_rate * 0.35
         + email_click_rate * 0.25
         + sms_clk_rate * 0.20
-        + wa_clk_rate * 0.15
+        + wa_clk_rate * 0.10
+        + rcs_clk_rate * 0.05
+        + sm_clk_rate  * 0.05
     )
     quality_signal = max(0.0, 1.0 - email_bounce_rate * 3 - email_unsub_rate * 5)
     wa_dominant    = 1.0 if aff_wa > 0.5 else 0.0
     freq_risk      = min(1.0, email_unsub_rate * 20 + ch_count / 5)
 
-    # 42 features
+    # 49 features
     feats = np.array([
         # Audience (6)
         seg_log, reach_pct, aff_email, aff_sms, aff_wa, aff_push,
@@ -153,9 +174,12 @@ def row_to_features(row: pd.Series) -> np.ndarray:
         engagement_composite, quality_signal, wa_dominant, freq_risk,
         # Totals (2)
         np.log1p(total_sent), _rate(total_conv, seg),
+        # New channels: presence (3) + rates (4)
+        has_rcs, has_qr, has_sm,
+        rcs_del_rate, rcs_clk_rate, qr_clk_rate, sm_clk_rate,
     ], dtype=np.float32)
 
-    assert len(feats) == 42, f"Expected 42 features, got {len(feats)}"
+    assert len(feats) == 49, f"Expected 49 features, got {len(feats)}"
     return np.nan_to_num(feats, nan=0.0, posinf=1.0, neginf=0.0)
 
 
@@ -167,6 +191,10 @@ def compute_targets(df: pd.DataFrame) -> pd.DataFrame:
         "segment_size", "email_blast", "email_opens", "email_clicks",
         "email_bounces", "email_unsubs", "sms_sent", "sms_clicks",
         "wa_sent", "wa_delivered", "wa_clicks",
+        "mp_sent", "mp_delivered", "mp_clicks",
+        "wp_sent", "wp_delivered", "wp_clicks",
+        "rcs_sent", "rcs_delivered", "rcs_clicks",
+        "qr_scans", "qr_clicks", "sm_blast", "sm_clicks",
     ]
     for col in _numeric:
         if col in df.columns:
@@ -186,7 +214,12 @@ def compute_targets(df: pd.DataFrame) -> pd.DataFrame:
     wa_del    = df.get("wa_delivered",      pd.Series(0, index=df.index)).fillna(0)
     wa_clk    = df.get("wa_clicks",         pd.Series(0, index=df.index)).fillna(0)
 
-    max_blast = pd.concat([em_blast, sms_sent, wa_sent], axis=1).max(axis=1)
+    mp_sent   = df.get("mp_sent",          pd.Series(0, index=df.index)).fillna(0)
+    wp_sent   = df.get("wp_sent",          pd.Series(0, index=df.index)).fillna(0)
+    rcs_sent  = df.get("rcs_sent",         pd.Series(0, index=df.index)).fillna(0)
+    sm_blast  = df.get("sm_blast",         pd.Series(0, index=df.index)).fillna(0)
+
+    max_blast = pd.concat([em_blast, sms_sent, wa_sent, mp_sent, wp_sent, rcs_sent, sm_blast], axis=1).max(axis=1)
 
     df["target_reach_rate"]       = (max_blast / seg).clip(0, 1)
     df["target_email_open_rate"]  = (em_opens  / em_blast.clip(lower=1)).clip(0, 1)

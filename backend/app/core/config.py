@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     intent_db_password: str = ""
     intent_api_t1: str = ""
 
+    # Per-tenant direct MySQL (camp_<UUID> databases on 10.200.2.63:6603)
+    tenant_direct_host: str = "10.200.2.63"
+    tenant_direct_port: int = 6603
+    tenant_direct_user: str = "res_apdev3138"
+    tenant_direct_password: str = ""
+
 
 @lru_cache()
 def get_settings() -> Settings:
