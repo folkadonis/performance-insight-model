@@ -1,5 +1,7 @@
-# Campaign Intelligence Engine
+# Campaign Intelligence Engine  new with change for git
 
+AI-powered campaign performance analysis for multi-tenant marketing platforms. Scores campaigns across 13 ML dimensions and generates structured, quantitative insights via an internal LLM.
+AI-powered campaign performance analysis for multi-tenant marketing platforms. Scores campaigns across 13 ML dimensions and generates structured, quantitative insights via an internal LLM.
 AI-powered campaign performance analysis for multi-tenant marketing platforms. Scores campaigns across 13 ML dimensions and generates structured, quantitative insights via an internal LLM.
 
 ---
