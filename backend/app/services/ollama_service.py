@@ -24,45 +24,42 @@ OLLAMA_MODEL = "qwen2.5:14b"
 
 _SYSTEM = """You are a Campaign Performance Intelligence Engine for a multi-tenant marketing platform.
 
-Analyze the provided ML-scored campaign context and generate precise, quantitative, actionable insights.
+Analyze the provided ML-scored campaign context and produce ONE single comprehensive consolidated insight that covers ALL findings together.
 
-Output ONLY a valid JSON array — no preamble, no markdown fences, no explanation.
+Do NOT split into multiple insights. Synthesize every signal — risks, opportunities, performance gaps, timing, journey — into a single detailed strategic analysis.
 
-Each object in the array must follow this exact schema:
+Output ONLY a valid JSON object — no preamble, no markdown fences, no explanation, no array brackets.
+
+The object must follow this exact schema:
 {
-  "insight_type"    : one of [Performance, Root Cause, Audience, Channel, Journey, Timing, Opportunity, Anomaly, Forecast, Prescriptive],
-  "category"        : one of [Opportunity, Risk, Recommendation, Benchmark, Prediction],
-  "scope"           : one of [BU, Tenant, Market, Industry],
-  "title"           : "Short 5-10 word headline summarising the insight",
-  "observation"     : "Factual statement with at least one specific number or percentage",
-  "root_cause"      : "ML-backed explanation referencing a specific score or benchmark delta",
-  "recommendation"  : "Specific, executable next action — not generic advice",
-  "business_impact" : "Quantified expected uplift or risk value (revenue, %, or count)",
+  "observation"     : "Comprehensive factual summary covering all channels and key metrics with specific numbers and percentages",
+  "root_cause"      : "Unified root cause analysis referencing the dominant ML scores and benchmark deltas driving overall campaign performance",
+  "recommendation"  : "Prioritized multi-step action plan addressing all findings — specific, executable, with timeframes",
+  "business_impact" : "Total combined net business impact quantified in revenue, uplift %, and risk value",
   "confidence"      : integer between 50 and 99
 }
 
 Quality rules:
-- observation MUST contain at least one specific number or percentage from the context (e.g. "23.0% open rate", "reach_score 0.055")
-- root_cause MUST reference an ML score value or benchmark delta with the exact figure
-- recommendation MUST be a specific executable action with a timeframe
-- business_impact MUST use exact figures (e.g. "+4.2pp conversion uplift", "₹12L revenue risk") — NEVER use multipliers like "3x", "4x", "2x better" or vague phrases like "significantly improve"
-- NEVER write "X times better/worse/higher/lower" — always state the actual delta or absolute value instead
-- Generate 5 to 10 insights covering as many of the 10 types as possible
-- Anomaly insights only when anomaly_flags are present
-- No two insights of the same type with similar observations
+- observation MUST cover every channel present (email, SMS, WhatsApp, etc.) and reference at least 4 specific numbers or percentages
+- root_cause MUST identify the single most impactful driver and explain how secondary factors compound it
+- recommendation MUST be a numbered action plan (at least 3 steps) with specific timeframes and owners
+- business_impact MUST state total uplift opportunity AND total risk, then the net expected value
+- confidence reflects overall ML model certainty across all scores
+- NEVER use multipliers like "3x", "4x" — always state the actual delta or absolute value
 """
 
-_USER_TEMPLATE = """Analyze the following ML-scored campaign context and generate insights:
+_USER_TEMPLATE = """Analyze the following ML-scored campaign context and produce ONE single consolidated insight covering everything:
 
 {context_block}
 
-Prioritize in this order:
-1. Anomalies flagged by ML model
-2. Largest benchmark deltas (positive or negative)
-3. Highest cross-sell opportunity scores
-4. Channels with efficiency score gap > 0.30
+Synthesize ALL of the following into a single comprehensive insight object:
+- All risk signals (bounce rate, unsubscribe rate, delivery failures, anomalies)
+- All opportunity signals (high-performing channels, cross-sell score, audience fit)
+- All performance gaps (underperforming channels, low ML scores, benchmark deltas)
+- Timing quality, journey effectiveness, and frequency risk
+- Overall conversion probability and strategic direction
 
-Return only the JSON array."""
+Return only a single JSON object (not an array)."""
 
 
 def _decode_ollama_response(raw: str) -> str:
@@ -130,6 +127,31 @@ def _extract_json_array(text: str) -> List[dict]:
         return []
 
 
+def _extract_json_object(text: str) -> dict:
+    """Strip markdown, find { … }, parse as a single JSON object."""
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\s*```\s*$", "", text, flags=re.MULTILINE)
+    # If the LLM wrapped it in an array anyway, unwrap the first item
+    if text.lstrip().startswith("["):
+        try:
+            items = json.loads(text)
+            if isinstance(items, list) and items:
+                return items[0] if isinstance(items[0], dict) else {}
+        except json.JSONDecodeError:
+            pass
+    start = text.find("{")
+    end   = text.rfind("}")
+    if start == -1 or end == -1:
+        log.warning("No JSON object found in Ollama response: %s", text[:300])
+        return {}
+    try:
+        return json.loads(text[start : end + 1])
+    except json.JSONDecodeError as exc:
+        log.warning("JSON object parse failed: %s | text: %s", exc, text[start:start+300])
+        return {}
+
+
 _MULTIPLIER_RE = re.compile(r'\b\d+(\.\d+)?[xX]\s*(better|worse|higher|lower|more|less|improvement|increase|decrease)\b', re.IGNORECASE)
 
 
@@ -172,6 +194,45 @@ class OllamaInsightService:
         self.model   = model
         self.timeout = timeout
 
+    async def generate_consolidated_insight(
+        self,
+        context_block: str,
+    ) -> dict:
+        """Return ONE consolidated insight dict with observation/root_cause/recommendation/business_impact/confidence."""
+        full_prompt = _SYSTEM + "\n\n" + _USER_TEMPLATE.format(context_block=context_block)
+        payload = {
+            "modelname":     self.model,
+            "prompt":        full_prompt,
+            "frameworktype": "ollama",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(self.url, json=payload)
+                resp.raise_for_status()
+                raw = resp.text
+        except httpx.ConnectError as exc:
+            raise ConnectionError(
+                f"Cannot reach Ollama endpoint at {self.url}. Detail: {exc}"
+            )
+        except httpx.HTTPStatusError as exc:
+            raise ValueError(f"Ollama API returned {exc.response.status_code}: {exc.response.text[:300]}")
+
+        decoded = _decode_ollama_response(raw)
+        obj     = _extract_json_object(decoded)
+
+        required = {"observation", "root_cause", "recommendation", "business_impact", "confidence"}
+        if not required.issubset(obj.keys()):
+            missing = required - obj.keys()
+            raise ValueError(f"Consolidated insight missing fields: {missing}. Raw: {decoded[:400]}")
+
+        return {
+            "observation":     _clean_multipliers(str(obj["observation"])),
+            "root_cause":      _clean_multipliers(str(obj["root_cause"])),
+            "recommendation":  _clean_multipliers(str(obj["recommendation"])),
+            "business_impact": _clean_multipliers(str(obj["business_impact"])),
+            "confidence":      max(50, min(99, int(obj["confidence"]))),
+        }
+
     async def generate_insights(
         self,
         context_block: str,
@@ -207,6 +268,9 @@ class OllamaInsightService:
             insight = _to_insight(obj)
             if insight and insight.confidence >= min_confidence:
                 insights.append(insight)
+
+        # Hard cap: return at most 5 consolidated insights
+        insights = insights[:5]
 
         log.info("Ollama returned %d raw objects → %d valid insights", len(raw_list), len(insights))
         return insights

@@ -20,8 +20,8 @@ class Settings(BaseSettings):
 
     ml_confidence_threshold: float = 0.60
     insight_min_confidence: int = 55
-    max_insights: int = 12
-    min_insights: int = 8
+    max_insights: int = 5
+    min_insights: int = 4
 
     # Resulticks MySQL (ProxySQL gateway — cross-schema: resulticksjobdb + resulticksmaster)
     resulticks_db_host: str = "10.200.2.195"

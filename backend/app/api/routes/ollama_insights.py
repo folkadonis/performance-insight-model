@@ -9,12 +9,11 @@ and returns a structured InsightObject array.
 """
 
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.models.schemas import InsightObject
 from app.services.ollama_service import OllamaInsightService
 
 log = logging.getLogger(__name__)
@@ -93,8 +92,11 @@ class OllamaInsightResponse(BaseModel):
     tenant_id: str
     campaign_name: str
     scope: str
-    total_insights: int
-    insights: List[InsightObject]
+    observation: str
+    root_cause: str
+    recommendation: str
+    business_impact: str
+    confidence: int
     model_used: str = "qwen2.5:14b"
     llm_endpoint: str = "http://10.102.1.2:7557/api/resgenapis/v2"
 
@@ -212,9 +214,8 @@ async def generate_ollama_insights(req: OllamaCampaignInput):
     )
 
     try:
-        insights = await _svc.generate_insights(
-            context_block  = context_block,
-            min_confidence = req.min_confidence,
+        insight = await _svc.generate_consolidated_insight(
+            context_block = context_block,
         )
     except ConnectionError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
@@ -228,6 +229,5 @@ async def generate_ollama_insights(req: OllamaCampaignInput):
         tenant_id      = req.tenant_id,
         campaign_name  = req.campaign_name or "Untitled",
         scope          = req.scope,
-        total_insights = len(insights),
-        insights       = insights,
+        **insight,
     )

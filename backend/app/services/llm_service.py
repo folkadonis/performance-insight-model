@@ -50,7 +50,7 @@ Quality rules:
 - Prescriptive insights must cite which ML score triggered the recommendation
 - Suppress insights with confidence below {min_confidence}
 
-Generate {min_insights} to {max_insights} insights covering as many of the 10 types as possible.
+Generate exactly {min_insights} to {max_insights} high-level consolidated insights. Do NOT produce one insight per channel or metric — GROUP related signals (e.g. all risk signals into one, all opportunity signals into one, all performance gaps into one). Each insight must synthesize multiple findings into a single strategic point.
 """
 
 USER_PROMPT_TEMPLATE = """Analyze the following ML-scored campaign context and generate insights:
