@@ -1,0 +1,247 @@
+HDFC SMS CAMPAIGN PERFORMANCE INSIGHT REPORT
+Generated : 2026-07-20 17:26
+API Base  : http://localhost:8001
+Tenant    : 00b4e220-6121-4a93-a63f-d0848bd73506 (T1=hUe)
+Campaigns : 370657 (Internal Test) | 367377 (CC_ACQ_SMS)
+
+================================================================================
+  ACTUAL CAMPAIGN METRICS (from raw data)
+================================================================================
+
+------------------------------------------------------------
+  Campaign 1 — RSLTKS Internal Email SMS Test 05 July 2026 (ID: 370657)
+------------------------------------------------------------
+Campaign Type : Scheduled | SMS | Internal Test
+Period        : 9 Jul 2026 – 12 Jul 2026 (3 days)
+T1            : \N  (no tenant code — internal Resulticks test)
+All metrics   : NULL — Totalbase, ReachCount, Clicks all \N
+Status        : SKIPPED — no real campaign data to score
+
+------------------------------------------------------------
+  Campaign 2 — CC_ACQ_SMS_VSER_ACE_CTRL_PIXEL_LTF_11MAY26 (ID: 367377)
+------------------------------------------------------------
+Campaign Type : Acquisition | SMS | Scheduled
+Period        : 11 May 2026 – 31 May 2026 (20 days)
+T1            : hUe  |  B1: F  |  C1: 7TV  |  B2: b4
+Segment Size  : 121,749
+Delivered     : 114,635  (delivery rate: 94.16%)
+Undelivered   : 6,651    (5.46%)
+Bounces       : 463      (0.38%)
+Total Clicks  : 484      (CTR of sent: 0.40%, CTR of delivered: 0.42%)
+Engagements   : 473
+Conversions   : 0        (FCC=0 — no conversion tracking)
+SMS Content   : Credit Card Acquisition — free CC + Rs.2750 voucher offer
+
+================================================================================
+  API 1: POST /api/v1/ml/predict  (Direct Model Prediction)
+================================================================================
+
+NOTE: Campaign 370657 skipped — all metrics null (internal test).
+
+------------------------------------------------------------
+  Campaign 2 — CC_ACQ_SMS (ID: 367377)
+------------------------------------------------------------
+Scope Used    : Tenant | Models Used: 8 | Version: 2026-07-20T11:46:02
+(New 49-feature models — includes SMS delivery + click targets)
+
+PREDICTIONS:
+  target_sms_delivery_rate           : 99.29%
+  target_sms_click_rate              : 0.88%
+  target_conversion_rate             : 0.41%
+  target_email_open_rate             : 0.57%
+  target_email_click_rate            : 1.66%
+  target_engagement                  : 0.05%
+  target_reach_rate                  : 100.0%
+  target_wa_open_rate                : 20.78%
+
+SCORES (percentile vs historical):
+  target_sms_delivery_rate           : 90.22th pctile  ★ HIGH
+  target_sms_click_rate              : 75.19th pctile  ABOVE AVERAGE
+  target_conversion_rate             : 64.03th pctile  ABOVE AVERAGE
+  target_email_click_rate            : 75.24th pctile  (email not used in this campaign)
+  target_email_open_rate             : 1.39th pctile   (email not used)
+  target_engagement                  : 0.71th pctile   LOW
+  target_reach_rate                  : 25.00th pctile  (known model gap — always ~100%)
+  target_wa_open_rate                : 7.79th pctile   (WA not used)
+
+================================================================================
+  API 2: POST /api/v1/ml/score  (Full Multi-Channel ML Scoring)
+================================================================================
+
+------------------------------------------------------------
+  Campaign 2 — CC_ACQ_SMS (ID: 367377)
+------------------------------------------------------------
+Scope Used             : Tenant | Models: 8 | Confidence: 0.80
+
+Cross-Channel Composites:
+  reach_score                    : 0.25    (25th pctile — reach model gap)
+  engagement_quality_score       : 0.0071  (VERY LOW — SMS-only, no email opens)
+  conversion_probability         : 0.6403  (64th pctile — GOOD)
+
+SMS Channel:
+  sms_delivery_score             : 0.9022  ★ EXCELLENT (90th pctile)
+  sms_click_score                : 0.7519  ABOVE AVERAGE (75th pctile)
+
+Email Channel (not used in campaign):
+  email_open_score               : 0.0139  (N/A — no email sent)
+  email_click_score              : 0.7524  (N/A — no email sent)
+  email_bounce_score             : 0.5000  (default)
+  email_unsub_score              : 0.5000  (default)
+
+Other Channels (not used):
+  wa_delivery_score              : 0.0779
+  wa_click_score / mp / wp / rcs / qr / sm : 0.5000 (defaults)
+
+Actuals (passed to score):
+  actual_reach_rate              : 1.0     (model uses blast as segment)
+  actual_sms_click_rate          : 0.4222% (of delivered)
+  segment_size                   : 121,749
+
+================================================================================
+  API 3: GET /api/v1/ml/models/Tenant/{id}  (Model Metadata)
+================================================================================
+
+Scope Level : Tenant
+Scope ID    : 00b4e220-6121-4a93-a63f-d0848bd73506
+Targets     : 8 (retrained 2026-07-20 with 49-feature vector)
+
+  target_conversion_rate
+    n_samples  : 6,754  |  val_mae: 0.000534  |  val_r2: 0.9943
+    trained_at : 2026-07-20T11:46:02
+
+  target_reach_rate
+    n_samples  : 7,339  |  val_mae: 0.0  |  val_r2: 1.0
+    trained_at : 2026-07-20T11:46:02
+
+  target_engagement
+    n_samples  : 7,074  |  val_mae: 0.000971  |  val_r2: 0.9978
+    trained_at : 2026-07-20T11:46:03
+
+  target_email_open_rate
+    n_samples  : 5,426  |  val_mae: 0.002118  |  val_r2: 0.9990
+    trained_at : 2026-07-20T11:46:03
+
+  target_email_click_rate
+    n_samples  : 5,106  |  val_mae: 0.001258  |  val_r2: 0.9953
+    trained_at : 2026-07-20T11:46:03
+
+  target_sms_delivery_rate  ★ NEW (49-feature retrain)
+    n_samples  : 1,736  |  val_mae: 0.002251  |  val_r2: 0.9817
+    trained_at : 2026-07-20T11:46:04
+
+  target_sms_click_rate  ★ NEW (49-feature retrain)
+    n_samples  : 1,622  |  val_mae: 0.004126  |  val_r2: 0.9866
+    trained_at : 2026-07-20T11:46:04
+
+  target_wa_open_rate
+    n_samples  : 51  |  val_mae: 0.02801  |  val_r2: 0.9851
+    trained_at : 2026-07-20T11:46:04
+
+================================================================================
+  API 4: GET /api/v1/benchmarks/{scope}/{id}  (Benchmark Profiles)
+================================================================================
+
+Tenant Benchmark  : Not available (no tenant-level benchmark stored)
+
+Industry Benchmark (IND_BANKING):
+  avg_reach_rate      : 48.0%
+  avg_conversion_rate : 3.8%
+  p50_conversion      : 3.7%
+  p75_conversion      : 4.5%
+  p90_conversion      : 5.5%
+
+================================================================================
+  API 5: POST /api/v1/insights/generate-ollama  (Consolidated LLM Insight)
+================================================================================
+
+------------------------------------------------------------
+  Campaign 2 — CC_ACQ_SMS (ID: 367377)
+------------------------------------------------------------
+OBSERVATION:
+  The SMS channel for the CC_ACQ_SMS_VSER_ACE_CTRL_PIXEL_LTF_11MAY26 campaign
+  reached 114,635 out of 121,749 targeted individuals with a strong delivery
+  rate but low engagement, as evidenced by a 0.4% click-through rate and no
+  conversions tracked. Email was not utilized in this campaign. The conversion
+  probability stands at 64%, despite the lack of benchmark comparisons and
+  secondary performance metrics like reach quality and engagement efficiency.
+
+ROOT CAUSE:
+  The primary driver for underperformance is the significantly low SMS
+  click-through rate (CTR) at 0.4%, which is below HDFC's typical performance
+  levels. Contributing factors include a high number of undelivered messages
+  (6,651) affecting delivery quality and the absence of cross-channel strategies
+  like email to bolster engagement and conversions.
+
+RECOMMENDATION:
+  1. Within one week, implement an automated retry mechanism for the 6,651
+     undelivered SMS messages to improve delivery success rates.
+  2. By end of next quarter, develop a multichannel strategy incorporating email
+     alongside SMS to enhance overall reach and engagement effectiveness.
+  3. In the following month, integrate conversion tracking tools to accurately
+     measure campaign performance and adjust strategies accordingly.
+
+BUSINESS IMPACT:
+  The total uplift opportunity is expected to increase by 20% if engagement
+  rates improve through multichannel strategies, while the risk of alienating
+  potential customers due to low engagement stands at a 15% reduction in
+  conversion probability. Net expected value improvement estimated at 5%.
+
+CONFIDENCE : 83
+MODEL USED : qwen2.5:14b
+ENDPOINT   : http://10.102.1.2:7557/api/resgenapis/v2
+
+================================================================================
+  FACT CHECK: MODEL PREDICTIONS vs ACTUALS (Campaign 367377)
+================================================================================
+
+SMS Campaign — CC_ACQ (20-day, Acquisition, 121,749 base)
+------------------------------------------------------------------------
+  Metric                        Model Predicted    Actual          Delta
+  -----------------------------------------------------------------------
+  SMS Delivery Rate             99.29%             94.16%          -5.13pp  GOOD
+  SMS Click Rate (of delivered) 0.88%              0.42%           -0.46pp  MODEL HIGH (~2x)
+  Conversion Rate               0.41%              0%              --        UNTRACKED (FCC=0)
+  Reach Rate                    100%               94.16%          --        MODEL GAP (known)
+
+NOTES:
+  - SMS delivery (99.29% vs 94.16%): only 5pp off — first live test of the new
+    target_sms_delivery_rate model trained on n=1,736 HDFC SMS campaigns.
+  - SMS click rate (0.88% predicted vs 0.42% actual): model overestimates by 2x.
+    CC acquisition SMS typically has lower CTR than the average across all SMS types.
+  - Engagement score (0.71th pctile) is misleadingly low because the composite
+    formula weights email 60% — SMS-only campaigns are structurally penalized.
+  - Conversion tracking is unwired (FCC=0); model's 64th pctile conversion
+    probability cannot be validated against actuals.
+
+================================================================================
+  NEW MODEL GAPS IDENTIFIED (SMS campaigns)
+================================================================================
+
+1. SMS DELIVERY MODEL OVERESTIMATES by ~5pp
+   Predicted 99.3% vs actual 94.2%. Training data likely skews toward high-delivery
+   campaigns. FIX: add undelivered_count and rejected_count as explicit training
+   features to capture carrier rejection patterns.
+
+2. SMS CLICK MODEL OVERESTIMATES by ~2x
+   Predicted 0.88% vs actual 0.42%. Acquisition SMS has structurally lower CTR
+   than transactional. FIX: add campaign content category (acquisition vs
+   transactional) as a feature; this is already in campaign_type_code (S vs T vs M).
+
+3. ENGAGEMENT COMPOSITE BREAKS FOR SMS-ONLY CAMPAIGNS
+   target_engagement formula weights email 60% (open 35% + click 25%).
+   SMS-only campaigns score near-zero even with 94% delivery.
+   FIX: make engagement composite channel-aware or add per-channel engagement scores.
+
+4. NO SMS BENCHMARK DATA
+   No tenant or industry SMS CTR benchmarks stored. Cannot compute
+   benchmark_delta for SMS campaigns.
+   FIX: populate benchmarks endpoint with SMS-specific industry averages.
+
+5. REACH RATE GAP PERSISTS
+   Same issue as email — model always predicts ~100% because training SQL uses
+   blast count as the denominator. Actual SMS reach is the delivered count.
+   FIX: separate delivered_count from blast_count in the training feature vector.
+
+================================================================================
+END OF REPORT
+================================================================================

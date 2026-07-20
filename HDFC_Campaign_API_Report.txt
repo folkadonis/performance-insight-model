@@ -1,0 +1,289 @@
+﻿HDFC CAMPAIGN PERFORMANCE INSIGHT REPORT
+Generated : 2026-07-20 15:07:52
+API Base  : http://localhost:8001
+Tenant    : 00b4e220-6121-4a93-a63f-d0848bd73506 (T1=hUe fallback)
+Campaigns : 370048 (CC_ACQ) | 371250 (OVERDRAFT_LOOKALIKE)
+
+================================================================================
+  ACTUAL CAMPAIGN METRICS (from raw data)
+================================================================================
+
+------------------------------------------------------------
+  Campaign 1 — CC_ACQ_EM_ASSET_PIXEL_REST_P1P2P3_23JUN26 (ID: 370048)
+------------------------------------------------------------
+Campaign Type : Acquisition | Email | Scheduled
+Period        : 23 Jun 2026 – 30 Jun 2026 (7 days)
+Segment Size  : 66,701
+Reach Count   : 5,922  (8.88%)
+Total Opens   : 7,742  (open rate: 11.61%)
+Total Clicks  : 156    (CTOR: 2.02%)
+Bounces       : 9,613  (14.41%)
+Hard Bounces  : 6,732  (HBD)
+SBC           : 2,867
+Unsubscribes  : 0
+Conversions   : 0
+Engagements   : 55
+
+------------------------------------------------------------
+  Campaign 2 — OVERDRAFT_LOOKALIKE_IMP_EM_20JUL26 (ID: 371250)
+------------------------------------------------------------
+Campaign Type : Lead Generation | Email | Scheduled
+Period        : 20 Jul 2026 – 29 Aug 2026 (40 days)
+Segment Size  : 207,617
+Reach Count   : 2,373  (1.14%)
+Total Opens   : 2,835  (open rate: 1.37%)
+Total Clicks  : 307    (CTOR: 10.83%)
+Bounces       : 8,108  (3.91%)
+Hard Bounces  : 8,096  (HBD)
+SBC           : 0
+Unsubscribes  : 0
+Conversions   : 0
+Engagements   : 189
+
+================================================================================
+  API 1: POST /api/v1/ml/predict  (Direct Model Prediction)
+================================================================================
+
+------------------------------------------------------------
+  Campaign 1 — CC_ACQ (ID: 370048)
+------------------------------------------------------------
+Scope Used    : Tenant | Models Used: 6 | Version: 2026-07-16T06:09:09.665769+00:00
+
+PREDICTIONS:
+  target_conversion_rate             : 1.0059%
+  target_email_click_rate            : 1.9914%
+  target_email_open_rate             : 11.6351%
+  target_engagement                  : 5.7974%
+  target_reach_rate                  : 100.0%
+  target_wa_open_rate                : 20.5853%
+
+SCORES (percentile vs historical):
+  target_conversion_rate             : 78.07th pctile
+  target_email_click_rate            : 77.20th pctile
+  target_email_open_rate             : 30.47th pctile
+  target_engagement                  : 32.13th pctile
+  target_reach_rate                  : 25.00th pctile
+  target_wa_open_rate                : 7.72th pctile
+
+QUANTILES:
+  target_conversion_rate: p25=0.151%  p50=0.267%  p75=0.649%  p90=2.390%
+  target_email_click_rate: p25=0.351%  p50=0.687%  p75=1.525%  p90=4.711%
+  target_email_open_rate: p25=10.556%  p50=15.484%  p75=22.042%  p90=36.006%
+  target_engagement: p25=5.167%  p50=7.378%  p75=10.535%  p90=18.925%
+  target_reach_rate: p25=100.0%  p50=100.0%  p75=100.0%  p90=100.0%
+  target_wa_open_rate: p25=66.667%  p50=92.300%  p75=100.0%  p90=100.0%
+
+------------------------------------------------------------
+  Campaign 2 — OVERDRAFT LOOKALIKE (ID: 371250)
+------------------------------------------------------------
+Scope Used    : Tenant | Models Used: 6 | Version: 2026-07-16T06:09:09.665769+00:00
+
+PREDICTIONS:
+  target_conversion_rate             : 5.5836%
+  target_email_click_rate            : 11.2312%
+  target_email_open_rate             : 1.1639%
+  target_engagement                  : 3.7982%
+  target_reach_rate                  : 100.0%
+  target_wa_open_rate                : 20.7900%
+
+SCORES (percentile vs historical):
+  target_conversion_rate             : 99.00th pctile
+  target_email_click_rate            : 99.00th pctile
+  target_email_open_rate             : 2.76th pctile
+  target_engagement                  : 18.38th pctile
+  target_reach_rate                  : 25.00th pctile
+  target_wa_open_rate                : 7.80th pctile
+
+QUANTILES:
+  target_conversion_rate: p25=0.151%  p50=0.267%  p75=0.649%  p90=2.390%
+  target_email_click_rate: p25=0.351%  p50=0.687%  p75=1.525%  p90=4.711%
+  target_email_open_rate: p25=10.556%  p50=15.484%  p75=22.042%  p90=36.006%
+  target_engagement: p25=5.167%  p50=7.378%  p75=10.535%  p90=18.925%
+  target_reach_rate: p25=100.0%  p50=100.0%  p75=100.0%  p90=100.0%
+  target_wa_open_rate: p25=66.667%  p50=92.300%  p75=100.0%  p90=100.0%
+
+================================================================================
+  API 2: POST /api/v1/ml/score  (Full 13-Dimension ML Scoring)
+================================================================================
+Campaign 1 Score Error: {"detail":[{"type":"missing","loc":["body"],"msg":"Field required","input":null}]}
+Campaign 2 Score Error: {"detail":[{"type":"missing","loc":["body"],"msg":"Field required","input":null}]}
+Campaign 1 Score Error: {"detail":[{"type":"int_parsing","loc":["body","industry_id"],"msg":"Input should be a valid integer, unable to parse string as an integer","input":"IND_BANKING"}]}
+Campaign 2 Score Error: {"detail":[{"type":"int_parsing","loc":["body","industry_id"],"msg":"Input should be a valid integer, unable to parse string as an integer","input":"IND_BANKING"}]}
+
+================================================================================
+  API 3: GET /api/v1/ml/models/Tenant/{id}  (Model Metadata)
+================================================================================
+
+------------------------------------------------------------
+  Tenant Model Info
+------------------------------------------------------------
+Scope Level : Tenant
+Scope ID    : 00b4e220-6121-4a93-a63f-d0848bd73506
+Targets     : 6
+
+  target_conversion_rate
+    n_samples  : 6774
+    val_mae    : 0.000786
+    val_r2     : 0.9917
+    trained_at : 2026-07-16T06:09:09.665769+00:00
+    quantiles  : p25=0.151%  p50=0.267%  p75=0.649%  p90=2.390%
+
+  target_email_click_rate
+    n_samples  : 5104
+    val_mae    : 0.001844
+    val_r2     : 0.9876
+    trained_at : 2026-07-16T06:09:10.977010+00:00
+    quantiles  : p25=0.351%  p50=0.687%  p75=1.525%  p90=4.711%
+
+  target_email_open_rate
+    n_samples  : 5430
+    val_mae    : 0.002545
+    val_r2     : 0.9987
+    trained_at : 2026-07-16T06:09:10.589153+00:00
+    quantiles  : p25=10.556%  p50=15.484%  p75=22.042%  p90=36.006%
+
+  target_engagement
+    n_samples  : 5481
+    val_mae    : 0.001184
+    val_r2     : 0.9989
+    trained_at : 2026-07-16T06:09:10.183171+00:00
+    quantiles  : p25=5.167%  p50=7.378%  p75=10.535%  p90=18.925%
+
+  target_reach_rate
+    n_samples  : 7339
+    val_mae    : 0.0
+    val_r2     : 1.0
+    trained_at : 2026-07-16T06:09:09.823920+00:00
+    quantiles  : p25=100.0%  p50=100.0%  p75=100.0%  p90=100.0%
+
+  target_wa_open_rate
+    n_samples  : 51
+    val_mae    : 0.02801
+    val_r2     : 0.9851
+    trained_at : 2026-07-16T06:09:11.128798+00:00
+    quantiles  : p25=66.667%  p50=92.300%  p75=100.0%  p90=100.0%
+
+
+================================================================================
+  API 4: GET /api/v1/benchmarks/{scope}/{id}  (Benchmark Profiles)
+================================================================================
+Benchmark Error (Tenant/00b4e220-6121-4a93-a63f-d0848bd73506): {"detail":"No benchmarks found for Tenant/00b4e220-6121-4a93-a63f-d0848bd73506"}
+
+------------------------------------------------------------
+  Benchmarks — Industry/IND_BANKING
+------------------------------------------------------------
+{
+    "scope_level":  "industry",
+    "scope_id":  "IND_BANKING",
+    "metrics":  {
+                    "avg_reach_rate":  0.48,
+                    "avg_conversion_rate":  0.038,
+                    "p50_conversion":  0.037,
+                    "p75_conversion":  0.045,
+                    "p90_conversion":  0.055
+                }
+}
+
+------------------------------------------------------------
+  Benchmarks — Market/MKT_IND_SOUTH
+------------------------------------------------------------
+{
+    "scope_level":  "market",
+    "scope_id":  "MKT_IND_SOUTH",
+    "metrics":  {
+                    "avg_conversion_rate":  0.041,
+                    "avg_reach_rate":  0.5
+                }
+}
+
+================================================================================
+  API 5: POST /api/v1/insights/generate-ollama  (Consolidated LLM Insight)
+================================================================================
+
+------------------------------------------------------------
+  Campaign 1 — CC_ACQ (ID: 370048)
+------------------------------------------------------------
+OBSERVATION:
+  The campaign CC_ACQ_EM_ASSET_PIXEL_REST_P1P2P3_23JUN26 targeting HDFC Bank's Credit Cards BU achieved a reach of 8.9% with an email open rate of 11.6%, but faced significant engagement challenges with a low click-through rate of 0.2% and a high bounce rate of 14.4%. The campaign's cross-sell opportunity score is strong at 87.0%, yet the conversion probability is low at 1.0%, indicating underperformance compared to both business unit and industry benchmarks, with an uplift deficit of -0.70pp for BU and -0.35pp for the industry.
+
+ROOT CAUSE:
+  The primary driver of underperformance is the poor engagement quality (ML score of 2.0%) due to a high bounce rate and low click-through rate, compounded by suboptimal email efficiency (11.6%) and a conversion probability that is significantly below average at 1.0%. Timing quality (61.0%) and journey effectiveness (68.0%) scores suggest that the campaign's timing and customer journey alignment are not fully optimized for the target audience, further impacting overall performance.
+
+RECOMMENDATION:
+  1. Improve email content and personalization to reduce bounce rate by 50% within two weeks, owned by marketing creative team. 2. Optimize email delivery settings and timing based on customer behavior data to enhance engagement quality over the next month, led by the technical operations team. 3. Enhance cross-sell messaging and targeting strategies in subsequent campaigns to capitalize on the high cross-sell opportunity score identified in this ML analysis, to be executed by the product marketing team in the following quarter.
+
+BUSINESS IMPACT:
+  The campaign faces a total risk of $150k due to low engagement and conversion rates, while offering an uplift opportunity of $250k based on high cross-sell potential. The net expected value is an increase of $100k.
+
+CONFIDENCE : 78
+MODEL USED : qwen2.5:14b
+ENDPOINT   : http://10.102.1.2:7557/api/resgenapis/v2
+
+------------------------------------------------------------
+  Campaign 2 — OVERDRAFT LOOKALIKE (ID: 371250)
+------------------------------------------------------------
+OBSERVATION:
+  The OVERDRAFT_LOOKALIKE_IMP_EM_20JUL26 campaign targeting 207,617 potential business banking clients from HDFC Bank achieved a low reach rate of 1.1%, with only 2,835 opens (1.4%) and 307 clicks (CTR=0.1%). Despite high engagement quality (CTOR=10.8%), the email channel faced significant challenges including a 3.9% bounce rate and no unsubscribes. The cross-sell opportunity score is strong at 72%, but conversion probability is lower at 5.6%. Compared to industry benchmarks, the open rate of 1.4% is significantly below both the tenant's average of 18% and the industry average of 21%.
+
+ROOT CAUSE:
+  The primary driver of poor performance is the extremely low reach rate (1.1%) due to delivery issues indicated by high bounce rates (3.9%). The secondary factor is the underperforming engagement quality, with a low open rate despite high click-through rates, suggesting potential issues with email rendering or content relevance.
+
+RECOMMENDATION:
+  1. Conduct a technical audit of the email delivery infrastructure and ensure proper handling of bounces within 2 weeks - Owner: IT Support
+2. Revise the email content and design to improve engagement with a focus on increasing open rates over the next month - Owner: Marketing Creative Team
+3. Leverage high cross-sell opportunity scores by creating targeted follow-up campaigns for engaged recipients - Owner: Campaign Manager
+
+BUSINESS IMPACT:
+  The campaign faces a total risk of $21,000 due to low reach and engagement issues but presents an uplift opportunity of $54,000 based on cross-sell potential, resulting in a net expected value of $33,000.
+
+CONFIDENCE : 99
+MODEL USED : qwen2.5:14b
+ENDPOINT   : http://10.102.1.2:7557/api/resgenapis/v2
+
+================================================================================
+  FACT CHECK: MODEL PREDICTIONS vs ACTUALS
+================================================================================
+
+Campaign 1 — CC_ACQ (7-day, Acquisition, 66,701 base)
+----------------------------------------------------------------------
+  Metric                       Model Predicted    Actual         Delta
+  -------------------------------------------------------------------
+  Email Open Rate              11.64%             11.61%         +0.03pp  EXCELLENT
+  Email CTOR                   1.99%              2.02%          -0.03pp  EXCELLENT
+  Bounce Rate                  (not predicted)    14.41%         --       HIGH RISK
+  Reach Rate                   100%               8.88%          --       MODEL GAP
+  Conversion Rate              1.01%              0%             --       UNTRACKED
+
+Campaign 2 — OVERDRAFT LOOKALIKE (40-day, Lead Gen, 207,617 base)
+----------------------------------------------------------------------
+  Metric                       Model Predicted    Actual         Delta
+  -------------------------------------------------------------------
+  Email Open Rate              1.16%              1.37%          -0.21pp  GOOD
+  Email CTOR                   11.23%             10.83%         +0.40pp  GOOD
+  Bounce Rate                  (not predicted)    3.91%          --       NORMAL
+  Reach Rate                   100%               1.14%          --       MODEL GAP
+  Conversion Rate              5.58%              0%             --       UNTRACKED
+
+
+================================================================================
+  MODEL GAPS & RECOMMENDATIONS
+================================================================================
+
+1. REACH RATE always predicts 100% — training SQL uses email_blast as segment,
+   so model learned reach=1.0 trivially. Actual HDFC reach is 1–9%.
+   FIX: add delivered_count as a separate feature distinct from blast count.
+
+2. BOUNCE RATE not predicted — training data has near-zero bounce entries.
+   Campaign 1 bounce rate 14.41% is a critical signal the model misses.
+   FIX: populate email_bounces in training SQL from rptcampaignemailsummaryfact.
+
+3. CONVERSION always 0 in actuals — FCC column is 0 in both records.
+   Attribution may not be wired or conversions tracked separately.
+   FIX: validate conversion tracking pipeline for HDFC tenant.
+
+4. TENANT MISMATCH — predictions used tenant 00b4e220 (T1=unknown), not
+   the actual HDFC tenant (T1=hUe). Map hUe to its UUID for accurate BU-level models.
+
+================================================================================
+END OF REPORT
+================================================================================
