@@ -535,4 +535,3 @@ async def build_insight_request(
     }
 
     return request, raw_hierarchy
-  # this is for example git 
