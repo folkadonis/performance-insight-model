@@ -184,12 +184,11 @@ def row_to_features(row: pd.Series) -> np.ndarray:
 
 
 def compute_targets(df: pd.DataFrame) -> pd.DataFrame:
-    """Add 9 regression target columns. Gracefully handles missing columns."""
+    """Add per-channel regression target columns for all 8 channels."""
     df = df.copy()
-    # MySQL CAST/COALESCE returns Decimal objects — force to float
     _numeric = [
         "segment_size", "email_blast", "email_opens", "email_clicks",
-        "email_bounces", "email_unsubs", "sms_sent", "sms_clicks",
+        "email_bounces", "email_unsubs", "sms_sent", "sms_delivered", "sms_clicks",
         "wa_sent", "wa_delivered", "wa_clicks",
         "mp_sent", "mp_delivered", "mp_clicks",
         "wp_sent", "wp_delivered", "wp_clicks",
@@ -201,42 +200,72 @@ def compute_targets(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(float)
     seg = df["segment_size"].clip(lower=1)
 
-    em_blast  = df.get("email_blast",       pd.Series(0, index=df.index)).fillna(0)
-    em_opens  = df.get("email_opens",       pd.Series(0, index=df.index)).fillna(0)
-    em_clicks = df.get("email_clicks",      pd.Series(0, index=df.index)).fillna(0)
-    em_bounce = df.get("email_bounces",     pd.Series(0, index=df.index)).fillna(0)
-    em_unsub  = df.get("email_unsubs",      pd.Series(0, index=df.index)).fillna(0)
+    def _col(name): return df.get(name, pd.Series(0, index=df.index)).fillna(0)
 
-    sms_sent  = df.get("sms_sent",          pd.Series(0, index=df.index)).fillna(0)
-    sms_clk   = df.get("sms_clicks",        pd.Series(0, index=df.index)).fillna(0)
+    em_blast  = _col("email_blast");  em_opens  = _col("email_opens")
+    em_clicks = _col("email_clicks"); em_bounce = _col("email_bounces")
+    em_unsub  = _col("email_unsubs")
 
-    wa_sent   = df.get("wa_sent",           pd.Series(0, index=df.index)).fillna(0)
-    wa_del    = df.get("wa_delivered",      pd.Series(0, index=df.index)).fillna(0)
-    wa_clk    = df.get("wa_clicks",         pd.Series(0, index=df.index)).fillna(0)
+    sms_sent  = _col("sms_sent");  sms_del = _col("sms_delivered");  sms_clk = _col("sms_clicks")
 
-    mp_sent   = df.get("mp_sent",          pd.Series(0, index=df.index)).fillna(0)
-    wp_sent   = df.get("wp_sent",          pd.Series(0, index=df.index)).fillna(0)
-    rcs_sent  = df.get("rcs_sent",         pd.Series(0, index=df.index)).fillna(0)
-    sm_blast  = df.get("sm_blast",         pd.Series(0, index=df.index)).fillna(0)
+    wa_sent   = _col("wa_sent");   wa_del  = _col("wa_delivered");   wa_clk  = _col("wa_clicks")
+
+    mp_sent   = _col("mp_sent");   mp_del  = _col("mp_delivered");   mp_clk  = _col("mp_clicks")
+    wp_sent   = _col("wp_sent");   wp_del  = _col("wp_delivered");   wp_clk  = _col("wp_clicks")
+    rcs_sent  = _col("rcs_sent");  rcs_del = _col("rcs_delivered");  rcs_clk = _col("rcs_clicks")
+    qr_scans  = _col("qr_scans");  qr_clk  = _col("qr_clicks")
+    sm_blast  = _col("sm_blast");  sm_clk  = _col("sm_clicks")
 
     max_blast = pd.concat([em_blast, sms_sent, wa_sent, mp_sent, wp_sent, rcs_sent, sm_blast], axis=1).max(axis=1)
 
-    df["target_reach_rate"]       = (max_blast / seg).clip(0, 1)
-    df["target_email_open_rate"]  = (em_opens  / em_blast.clip(lower=1)).clip(0, 1)
-    df["target_email_click_rate"] = (em_clicks / em_opens.clip(lower=1)).clip(0, 1)
-    df["target_email_bounce_rate"]= (em_bounce / em_blast.clip(lower=1)).clip(0, 1)
-    df["target_email_unsub_rate"] = (em_unsub  / em_blast.clip(lower=1)).clip(0, 1)
-    df["target_wa_open_rate"]     = (wa_del    / wa_sent.clip(lower=1)).clip(0, 1)
-    df["target_wa_click_rate"]    = (wa_clk    / wa_del.clip(lower=1)).clip(0, 1)
-    df["target_engagement"]       = (
-        df["target_email_open_rate"] * 0.45
-        + df["target_email_click_rate"] * 0.30
-        + df["target_wa_open_rate"] * 0.25
+    # ── Email ─────────────────────────────────────────────────────────────────
+    df["target_reach_rate"]        = (max_blast / seg).clip(0, 1)
+    df["target_email_open_rate"]   = (em_opens  / em_blast.clip(lower=1)).clip(0, 1)
+    df["target_email_click_rate"]  = (em_clicks / em_opens.clip(lower=1)).clip(0, 1)
+    df["target_email_bounce_rate"] = (em_bounce / em_blast.clip(lower=1)).clip(0, 1)
+    df["target_email_unsub_rate"]  = (em_unsub  / em_blast.clip(lower=1)).clip(0, 1)
+
+    # ── SMS ───────────────────────────────────────────────────────────────────
+    df["target_sms_delivery_rate"] = (sms_del / sms_sent.clip(lower=1)).clip(0, 1)
+    df["target_sms_click_rate"]    = (sms_clk / sms_del.clip(lower=1)).clip(0, 1)
+
+    # ── WhatsApp ──────────────────────────────────────────────────────────────
+    df["target_wa_open_rate"]      = (wa_del  / wa_sent.clip(lower=1)).clip(0, 1)
+    df["target_wa_click_rate"]     = (wa_clk  / wa_del.clip(lower=1)).clip(0, 1)
+
+    # ── Mobile Push ───────────────────────────────────────────────────────────
+    df["target_mp_delivery_rate"]  = (mp_del  / mp_sent.clip(lower=1)).clip(0, 1)
+    df["target_mp_click_rate"]     = (mp_clk  / mp_del.clip(lower=1)).clip(0, 1)
+
+    # ── Web Push ──────────────────────────────────────────────────────────────
+    df["target_wp_delivery_rate"]  = (wp_del  / wp_sent.clip(lower=1)).clip(0, 1)
+    df["target_wp_click_rate"]     = (wp_clk  / wp_del.clip(lower=1)).clip(0, 1)
+
+    # ── RCS ───────────────────────────────────────────────────────────────────
+    df["target_rcs_delivery_rate"] = (rcs_del / rcs_sent.clip(lower=1)).clip(0, 1)
+    df["target_rcs_click_rate"]    = (rcs_clk / rcs_del.clip(lower=1)).clip(0, 1)
+
+    # ── QR Code ───────────────────────────────────────────────────────────────
+    df["target_qr_click_rate"]     = (qr_clk  / qr_scans.clip(lower=1)).clip(0, 1)
+
+    # ── Social Media ──────────────────────────────────────────────────────────
+    df["target_sm_click_rate"]     = (sm_clk  / sm_blast.clip(lower=1)).clip(0, 1)
+
+    # ── Composites ────────────────────────────────────────────────────────────
+    df["target_engagement"] = (
+        df["target_email_open_rate"]  * 0.35
+        + df["target_email_click_rate"] * 0.25
+        + df["target_sms_click_rate"]   * 0.15
+        + df["target_wa_click_rate"]    * 0.15
+        + df["target_mp_click_rate"]    * 0.05
+        + df["target_wp_click_rate"]    * 0.05
     ).clip(0, 1)
-    df["target_conversion_rate"]  = (
-        df["target_email_click_rate"] * 0.5
-        + (sms_clk / sms_sent.clip(lower=1)).clip(0, 1) * 0.3
-        + df["target_wa_click_rate"] * 0.2
+    df["target_conversion_rate"] = (
+        df["target_email_click_rate"] * 0.40
+        + df["target_sms_click_rate"]  * 0.25
+        + df["target_wa_click_rate"]   * 0.20
+        + df["target_mp_click_rate"]   * 0.10
+        + df["target_wp_click_rate"]   * 0.05
     ).clip(0, 1)
     return df
 
@@ -250,13 +279,32 @@ def build_X_y(df: pd.DataFrame, target: str = "target_conversion_rate") -> Tuple
 
 
 TARGET_COLUMNS = [
+    # Cross-channel composites
     "target_conversion_rate",
     "target_reach_rate",
     "target_engagement",
+    # Email
     "target_email_open_rate",
     "target_email_click_rate",
     "target_email_bounce_rate",
     "target_email_unsub_rate",
+    # SMS
+    "target_sms_delivery_rate",
+    "target_sms_click_rate",
+    # WhatsApp
     "target_wa_open_rate",
     "target_wa_click_rate",
+    # Mobile Push
+    "target_mp_delivery_rate",
+    "target_mp_click_rate",
+    # Web Push
+    "target_wp_delivery_rate",
+    "target_wp_click_rate",
+    # RCS
+    "target_rcs_delivery_rate",
+    "target_rcs_click_rate",
+    # QR Code
+    "target_qr_click_rate",
+    # Social Media
+    "target_sm_click_rate",
 ]

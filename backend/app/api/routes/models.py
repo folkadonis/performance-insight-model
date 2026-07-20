@@ -313,20 +313,41 @@ async def score_campaign(req: ScoreCampaignRequest):
     return {
         "scope_used":               scope_used,
         "n_models":                 len(bundles),
+        # Cross-channel composites
         "reach_score":              s("target_reach_rate"),
         "engagement_quality_score": s("target_engagement"),
+        "conversion_probability":   s("target_conversion_rate"),
+        # Email
         "email_open_score":         s("target_email_open_rate"),
         "email_click_score":        s("target_email_click_rate"),
-        "conversion_probability":   s("target_conversion_rate"),
-        "frequency_risk_score":     s("target_email_unsub_rate"),
-        "churn_signal_score":       s("target_email_bounce_rate"),
-        # Derived metrics from raw inputs
+        "email_bounce_score":       s("target_email_bounce_rate"),
+        "email_unsub_score":        s("target_email_unsub_rate"),
+        # SMS
+        "sms_delivery_score":       s("target_sms_delivery_rate"),
+        "sms_click_score":          s("target_sms_click_rate"),
+        # WhatsApp
+        "wa_delivery_score":        s("target_wa_open_rate"),
+        "wa_click_score":           s("target_wa_click_rate"),
+        # Mobile Push
+        "mp_delivery_score":        s("target_mp_delivery_rate"),
+        "mp_click_score":           s("target_mp_click_rate"),
+        # Web Push
+        "wp_delivery_score":        s("target_wp_delivery_rate"),
+        "wp_click_score":           s("target_wp_click_rate"),
+        # RCS
+        "rcs_delivery_score":       s("target_rcs_delivery_rate"),
+        "rcs_click_score":          s("target_rcs_click_rate"),
+        # QR Code
+        "qr_click_score":           s("target_qr_click_rate"),
+        # Social Media
+        "sm_click_score":           s("target_sm_click_rate"),
+        # Derived from raw inputs
         "actual_reach_rate":        round(min(reach_rate, 1.0), 4),
         "actual_email_open_rate":   round(email_open_rate, 4),
         "actual_email_click_rate":  round(email_click_rate, 4),
         "actual_sms_click_rate":    round(sms_click_rate, 4),
         "segment_size":             seg,
-        "model_confidence":         round(min(0.95, 0.70 + 0.25 * len(bundles) / 9), 3),
+        "model_confidence":         round(min(0.95, 0.70 + 0.25 * len(bundles) / 20), 3),
     }
 
 
