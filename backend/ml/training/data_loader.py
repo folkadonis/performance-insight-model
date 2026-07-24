@@ -193,7 +193,7 @@ _DIRECT_TRAINING_SQL = """
     COALESCE(cm.DepartmentID, 0)                              AS bu_id,
     cm.CampaignType                                           AS campaign_type_code,
     1                                                         AS channel_id,
-    0 AS industry_id, 0 AS market_id,
+    COALESCE(cc.IndustryID, 0) AS industry_id, 0 AS market_id,
     COALESCE(DATEDIFF(cm.EndDate, cm.StartDate), 7)          AS campaign_duration_days,
     COALESCE(ef.KW, cm.NumberOfRecipients, 0)                AS segment_size,
     COALESCE(ef.KW,   0)                                      AS email_blast,
@@ -210,6 +210,7 @@ _DIRECT_TRAINING_SQL = """
     0 AS sm_blast,  0 AS sm_clicks
 FROM ccampaignmetadatamaster cm
 JOIN rptcampaignemailsummaryfact ef ON cm.CampaignGUID = ef.CampaignGUID
+LEFT JOIN ccampaign cc ON cc.CampaignID = cm.CampaignID
 WHERE cm.ChannelID = 1 AND cm.NumberOfRecipients > 0 {where_clause}
 ORDER BY cm.CampaignID DESC LIMIT {email_limit})
 
@@ -217,7 +218,7 @@ UNION ALL
 
 (SELECT
     cm.CampaignID, COALESCE(cm.DepartmentID, 0), cm.CampaignType, 2,
-    0, 0,
+    COALESCE(cc.IndustryID, 0), 0,
     COALESCE(DATEDIFF(cm.EndDate, cm.StartDate), 7),
     COALESCE(sf.Y0, cm.NumberOfRecipients, 0),
     0, 0, 0, 0, 0,
@@ -230,6 +231,7 @@ UNION ALL
     0, 0
 FROM ccampaignmetadatamaster cm
 JOIN rptcampaignsmssummaryfact sf ON cm.CampaignGUID = sf.CampaignGUID
+LEFT JOIN ccampaign cc ON cc.CampaignID = cm.CampaignID
 WHERE cm.ChannelID = 2 AND cm.NumberOfRecipients > 0 {where_clause}
 ORDER BY cm.CampaignID DESC LIMIT {sms_limit})
 
@@ -237,7 +239,7 @@ UNION ALL
 
 (SELECT
     cm.CampaignID, COALESCE(cm.DepartmentID, 0), cm.CampaignType, 21,
-    0, 0,
+    COALESCE(cc.IndustryID, 0), 0,
     COALESCE(DATEDIFF(cm.EndDate, cm.StartDate), 7),
     COALESCE(wf.Y0, cm.NumberOfRecipients, 0),
     0, 0, 0, 0, 0,
@@ -250,6 +252,7 @@ UNION ALL
     0, 0
 FROM ccampaignmetadatamaster cm
 JOIN rptcampaignwasummaryfact wf ON cm.CampaignGUID = wf.CampaignGUID
+LEFT JOIN ccampaign cc ON cc.CampaignID = cm.CampaignID
 WHERE cm.ChannelID = 21 AND cm.NumberOfRecipients > 0 {where_clause}
 ORDER BY cm.CampaignID DESC LIMIT {wa_limit})
 
@@ -257,7 +260,7 @@ UNION ALL
 
 (SELECT
     cm.CampaignID, COALESCE(cm.DepartmentID, 0), cm.CampaignType, 14,
-    0, 0,
+    COALESCE(cc.IndustryID, 0), 0,
     COALESCE(DATEDIFF(cm.EndDate, cm.StartDate), 7),
     COALESCE(mf.Y0, cm.NumberOfRecipients, 0),
     0, 0, 0, 0, 0,
@@ -270,6 +273,7 @@ UNION ALL
     0, 0
 FROM ccampaignmetadatamaster cm
 JOIN rptcampaignmpsummaryfact mf ON cm.CampaignGUID = mf.CampaignGUID
+LEFT JOIN ccampaign cc ON cc.CampaignID = cm.CampaignID
 WHERE cm.ChannelID = 14 AND cm.NumberOfRecipients > 0 {where_clause}
 ORDER BY cm.CampaignID DESC LIMIT {mp_limit})
 
@@ -277,7 +281,7 @@ UNION ALL
 
 (SELECT
     cm.CampaignID, COALESCE(cm.DepartmentID, 0), cm.CampaignType, 8,
-    0, 0,
+    COALESCE(cc.IndustryID, 0), 0,
     COALESCE(DATEDIFF(cm.EndDate, cm.StartDate), 7),
     COALESCE(wpf.Y0, cm.NumberOfRecipients, 0),
     0, 0, 0, 0, 0,
@@ -290,6 +294,7 @@ UNION ALL
     0, 0
 FROM ccampaignmetadatamaster cm
 JOIN rptcampaignwpsummaryfact wpf ON cm.CampaignGUID = wpf.CampaignGUID
+LEFT JOIN ccampaign cc ON cc.CampaignID = cm.CampaignID
 WHERE cm.ChannelID = 8 AND cm.NumberOfRecipients > 0 {where_clause}
 ORDER BY cm.CampaignID DESC LIMIT {wp_limit})
 
@@ -297,7 +302,7 @@ UNION ALL
 
 (SELECT
     cm.CampaignID, COALESCE(cm.DepartmentID, 0), cm.CampaignType, 41,
-    0, 0,
+    COALESCE(cc.IndustryID, 0), 0,
     COALESCE(DATEDIFF(cm.EndDate, cm.StartDate), 7),
     COALESCE(rf.Y0, cm.NumberOfRecipients, 0),
     0, 0, 0, 0, 0,
@@ -310,6 +315,7 @@ UNION ALL
     0, 0
 FROM ccampaignmetadatamaster cm
 JOIN rptcampaignrcssummaryfact rf ON cm.CampaignGUID = rf.CampaignGUID
+LEFT JOIN ccampaign cc ON cc.CampaignID = cm.CampaignID
 WHERE cm.ChannelID = 41 AND cm.NumberOfRecipients > 0 {where_clause}
 ORDER BY cm.CampaignID DESC LIMIT {rcs_limit})
 
@@ -317,7 +323,7 @@ UNION ALL
 
 (SELECT
     cm.CampaignID, COALESCE(cm.DepartmentID, 0), cm.CampaignType, 3,
-    0, 0,
+    COALESCE(cc.IndustryID, 0), 0,
     COALESCE(DATEDIFF(cm.EndDate, cm.StartDate), 7),
     COALESCE(qf.`1D`, cm.NumberOfRecipients, 0),
     0, 0, 0, 0, 0,
@@ -330,6 +336,7 @@ UNION ALL
     0, 0
 FROM ccampaignmetadatamaster cm
 JOIN rptcampaignqrsummaryfact qf ON cm.CampaignGUID = qf.CampaignGUID
+LEFT JOIN ccampaign cc ON cc.CampaignID = cm.CampaignID
 WHERE cm.ChannelID = 3 AND cm.NumberOfRecipients > 0 {where_clause}
 ORDER BY cm.CampaignID DESC LIMIT {qr_limit})
 
@@ -337,7 +344,7 @@ UNION ALL
 
 (SELECT
     cm.CampaignID, COALESCE(cm.DepartmentID, 0), cm.CampaignType, cm.ChannelID,
-    0, 0,
+    COALESCE(cc.IndustryID, 0), 0,
     COALESCE(DATEDIFF(cm.EndDate, cm.StartDate), 7),
     COALESCE(smf.KW, cm.NumberOfRecipients, 0),
     0, 0, 0, 0, 0,
@@ -350,6 +357,7 @@ UNION ALL
     COALESCE(smf.KW, 0), COALESCE(smf.U0, 0)
 FROM ccampaignmetadatamaster cm
 JOIN rptcampaignsocialmediasummaryfact smf ON cm.CampaignGUID = smf.CampaignGUID
+LEFT JOIN ccampaign cc ON cc.CampaignID = cm.CampaignID
 WHERE cm.ChannelID IN (5, 7) AND cm.NumberOfRecipients > 0 {where_clause}
 ORDER BY cm.CampaignID DESC LIMIT {sm_limit})
 """
